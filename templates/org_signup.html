@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Create Organization — AI Observer</title>
+  <meta name="description" content="Register your institution on AI Observer to manage teachers, students, and proctored assessments." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/login.css" />
+  <style>
+    body { overflow: auto; }
+    .signup-wrapper {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      width: 100%;
+      padding: 3rem 1rem;
+    }
+    .signup-card {
+      background: rgba(14, 14, 14, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius);
+      padding: 2.5rem 2.5rem;
+      width: 100%;
+      max-width: 560px;
+      backdrop-filter: blur(24px) saturate(1.6);
+      -webkit-backdrop-filter: blur(24px) saturate(1.6);
+      box-shadow:
+        0 8px 40px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 0 60px rgba(230, 57, 70, 0.06);
+      animation: fadeSlideUp 0.7s ease;
+    }
+    .signup-card h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .signup-card p.sub {
+      margin: 0 0 1.5rem;
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+    }
+    .form-grid {
+      display: grid;
+      gap: 0 1.25rem;
+    }
+    @media (min-width: 500px) {
+      .form-grid { grid-template-columns: 1fr 1fr; }
+    }
+    .form-grid .full { grid-column: 1 / -1; }
+    .signup-btn {
+      width: 100%;
+      padding: 0.75rem 1.5rem;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: linear-gradient(135deg, var(--accent) 0%, #c62828 100%);
+      color: #fff;
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all var(--transition);
+      box-shadow: 0 4px 20px rgba(230, 57, 70, 0.35);
+      margin-top: 0.5rem;
+    }
+    .signup-btn:hover:not(:disabled) {
+      box-shadow: 0 6px 28px rgba(230, 57, 70, 0.5);
+      transform: translateY(-1px);
+    }
+    .signup-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .signup-msg {
+      font-size: 0.85rem;
+      min-height: 1.3rem;
+      margin-top: 0.75rem;
+      font-weight: 500;
+      text-align: center;
+    }
+    .signup-msg.error { color: var(--danger); }
+    .signup-msg.ok { color: var(--success); }
+    .back-link {
+      display: inline-block;
+      margin-top: 1.5rem;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color var(--transition);
+    }
+    .back-link:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <canvas id="particleCanvas"></canvas>
+
+  <div class="signup-wrapper">
+    <!-- Logo -->
+    <div class="logo-area">
+      <div class="logo-icon">
+        <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M40 4L8 18v22c0 18.6 13.6 35.8 32 40 18.4-4.2 32-21.4 32-40V18L40 4z" fill="rgba(230,57,70,0.12)" stroke="#e63946" stroke-width="2.5"/>
+          <ellipse cx="40" cy="36" rx="18" ry="12" fill="none" stroke="#e63946" stroke-width="2"/>
+          <circle cx="40" cy="36" r="7" fill="#e63946" opacity="0.9"/>
+          <circle cx="40" cy="36" r="3" fill="#1a1a1a"/>
+          <circle cx="43" cy="33" r="1.5" fill="#fff" opacity="0.8"/>
+          <text x="40" y="62" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" font-weight="800" fill="#e63946" letter-spacing="1.5">AI OBSERVER</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Signup Card -->
+    <div class="signup-card">
+      <h1>Create Organization</h1>
+      <p class="sub">Register your institution to manage teachers, students, and proctored assessments.</p>
+
+      <form id="orgSignupForm">
+        <div class="form-grid">
+          <div class="input-group">
+            <label for="org_name">Organization Name</label>
+            <input id="org_name" type="text" required autocomplete="organization" placeholder="Your University" />
+          </div>
+          <div class="input-group">
+            <label for="org_email">Email</label>
+            <input id="org_email" type="email" required placeholder="admin@university.edu" />
+          </div>
+          <div class="input-group full">
+            <label for="org_password">Password (min 8)</label>
+            <input id="org_password" type="password" required minlength="8" placeholder="••••••••" />
+          </div>
+          <div class="input-group">
+            <label for="org_location">Location</label>
+            <input id="org_location" type="text" required placeholder="City, State" />
+          </div>
+          <div class="input-group">
+            <label for="org_country">Country</label>
+            <input id="org_country" type="text" required placeholder="Egypt" />
+          </div>
+          <div class="input-group">
+            <label for="org_tax_id">Tax ID</label>
+            <input id="org_tax_id" type="text" required placeholder="TAX-12345" />
+          </div>
+          <div class="input-group">
+            <label for="org_reg">Registration Number</label>
+            <input id="org_reg" type="text" required placeholder="REG-67890" />
+          </div>
+          <div class="input-group">
+            <label for="org_phone">Phone</label>
+            <input id="org_phone" type="tel" required placeholder="+20 123 456 789" />
+          </div>
+          <div class="input-group">
+            <label for="org_website">Website</label>
+            <input id="org_website" type="text" required placeholder="https://university.edu" />
+          </div>
+        </div>
+
+        <button type="submit" class="signup-btn" id="signupBtn">Register Organization</button>
+      </form>
+
+      <div id="signupMsg" class="signup-msg"></div>
+    </div>
+
+    <a href="/" class="back-link">← Back to Login</a>
+  </div>
+
+  <!-- Reuse particle animation from login.js but simplified inline -->
+  <script>
+  (function () {
+    "use strict";
+    const canvas = document.getElementById("particleCanvas");
+    const ctx = canvas.getContext("2d");
+    let particles = [];
+
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    resize();
+    window.addEventListener("resize", resize);
+
+    class P {
+      constructor() { this.reset(); }
+      reset() {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.size = Math.random() * 2 + 0.5;
+        this.sx = (Math.random() - 0.5) * 0.3;
+        this.sy = (Math.random() - 0.5) * 0.3;
+        this.op = Math.random() * 0.4 + 0.1;
+        this.red = Math.random() > 0.65;
+      }
+      update() {
+        this.x += this.sx; this.y += this.sy;
+        if (this.x < -10 || this.x > canvas.width + 10 || this.y < -10 || this.y > canvas.height + 10) this.reset();
+      }
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = this.red ? `rgba(230,57,70,${this.op})` : `rgba(255,255,255,${this.op * 0.4})`;
+        ctx.fill();
+      }
+    }
+
+    for (let i = 0; i < 45; i++) particles.push(new P());
+
+    function loop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => { p.update(); p.draw(); });
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+    // Form submit
+    const $ = (id) => document.getElementById(id);
+
+    function setMsg(text, cls) {
+      const el = $("signupMsg");
+      el.textContent = text || "";
+      el.className = "signup-msg" + (cls ? " " + cls : "");
+    }
+
+    $("orgSignupForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("signupBtn");
+      btn.disabled = true;
+      btn.textContent = "Creating…";
+      setMsg("", "");
+
+      const body = {
+        name: $("org_name").value.trim(),
+        email: $("org_email").value.trim(),
+        password: $("org_password").value,
+        location: $("org_location").value.trim(),
+        country: $("org_country").value.trim(),
+        tax_id: $("org_tax_id").value.trim(),
+        registration_number: $("org_reg").value.trim(),
+        phone: $("org_phone").value.trim(),
+        website: $("org_website").value.trim(),
+      };
+
+      try {
+        const res = await fetch("/api/org/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || "Registration failed");
+
+        setMsg("Organization registered successfully! Redirecting to login…", "ok");
+        setTimeout(() => { window.location.href = "/"; }, 2000);
+      } catch (err) {
+        setMsg(err.message || "Registration failed.", "error");
+        btn.disabled = false;
+        btn.textContent = "Register Organization";
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

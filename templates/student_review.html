@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Tutor Review — AI Observer</title>
+  <meta name="description" content="AI-powered quiz review with personalized tutoring from lecture materials." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/exam_portal.css" />
+  <style>
+    .review-container { max-width: 900px; margin: 0 auto; }
+
+    /* Summary card */
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .summary-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; text-align: center; }
+    .summary-stat .val { font-size: 2rem; font-weight: 800; color: var(--accent); line-height: 1; }
+    .summary-stat .lbl { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.3rem; font-weight: 600; }
+
+    /* Question breakdown */
+    .q-review { margin-bottom: 1.5rem; animation: slideIn 0.4s ease forwards; opacity: 0; transform: translateY(16px); }
+    @keyframes slideIn { to { opacity: 1; transform: translateY(0); } }
+    .q-review .q-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem; }
+    .q-review .q-num { font-weight: 800; font-size: 0.85rem; color: var(--accent); }
+    .q-review .q-tags { display: flex; gap: 0.35rem; }
+    .q-review .q-tags .badge { font-size: 0.68rem; font-weight: 700; padding: 0.2rem 0.55rem; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .badge-wrong { background: rgba(239,68,68,0.15); color: var(--danger); }
+    .badge-overtime { background: rgba(245,158,11,0.15); color: var(--warn); }
+    .badge-correct { background: rgba(34,197,94,0.15); color: var(--success); }
+
+    /* Options display */
+    .opt-display { display: grid; gap: 0.4rem; margin: 0.75rem 0; }
+    .opt-item { padding: 0.6rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.88rem; display: flex; align-items: center; gap: 0.5rem; }
+    .opt-item.correct-opt { border-color: var(--success); background: rgba(34,197,94,0.08); }
+    .opt-item.wrong-opt { border-color: var(--danger); background: rgba(239,68,68,0.08); }
+    .opt-item .opt-indicator { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 800; flex-shrink: 0; }
+    .opt-item.correct-opt .opt-indicator { background: var(--success); color: #fff; }
+    .opt-item.wrong-opt .opt-indicator { background: var(--danger); color: #fff; }
+
+    /* Time bar */
+    .time-bar-wrap { margin: 0.75rem 0; }
+    .time-bar-label { font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.3rem; display: flex; justify-content: space-between; }
+    .time-bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; position: relative; }
+    .time-bar .fill { height: 100%; border-radius: 999px; transition: width 0.6s ease; }
+    .time-bar .expected-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-secondary); border-radius: 1px; }
+
+    /* AI explanation */
+    .ai-box { background: rgba(230,57,70,0.05); border: 1px solid rgba(230,57,70,0.2); border-radius: var(--radius-sm); padding: 1rem 1.25rem; margin-top: 0.75rem; }
+    .ai-box h4 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--accent); display: flex; align-items: center; gap: 0.4rem; }
+    .ai-box p { margin: 0 0 0.5rem; font-size: 0.88rem; line-height: 1.6; color: var(--text); }
+    .ai-box .lecture-ref { display: inline-flex; align-items: center; gap: 0.3rem; background: rgba(111,66,193,0.15); color: #b184f5; font-size: 0.78rem; font-weight: 600; padding: 0.25rem 0.6rem; border-radius: 6px; margin-top: 0.25rem; text-decoration: none; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
+    .ai-box .lecture-ref:hover { background: rgba(111,66,193,0.3); border-color: rgba(111,66,193,0.4); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(111,66,193,0.2); }
+    .ai-box .lecture-ref .ref-arrow { opacity: 0.6; transition: transform 0.2s; }
+    .ai-box .lecture-ref:hover .ref-arrow { opacity: 1; transform: translateX(2px); }
+    .ai-box .study-tip { margin-top: 0.5rem; padding: 0.6rem 0.85rem; background: rgba(34,197,94,0.08); border-radius: 8px; font-size: 0.82rem; color: var(--success); }
+
+    /* Practice quiz */
+    .practice-section { margin-top: 2.5rem; border-top: 1px solid var(--border); padding-top: 2rem; }
+    .practice-q { margin-bottom: 1.25rem; }
+    .practice-q .q-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.5rem; }
+    .practice-opts { display: grid; gap: 0.4rem; }
+    .practice-opt { display: block; width: 100%; text-align: left; padding: 0.65rem 0.9rem; border-radius: var(--radius-sm); border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text); font-family: inherit; font-size: 0.88rem; cursor: pointer; transition: all 0.2s; }
+    .practice-opt:hover { border-color: var(--accent); background: var(--accent-dim); }
+    .practice-opt.p-selected { border-color: var(--accent); background: var(--accent-dim); box-shadow: 0 0 0 2px var(--accent-glow); }
+    .practice-opt.p-correct { border-color: var(--success); background: rgba(34,197,94,0.1); color: var(--success); }
+    .practice-opt.p-wrong { border-color: var(--danger); background: rgba(239,68,68,0.1); color: var(--danger); }
+    .practice-explanation { margin-top: 0.5rem; padding: 0.6rem 0.85rem; background: rgba(34,197,94,0.06); border-radius: 8px; font-size: 0.82rem; color: var(--text-secondary); display: none; }
+    .practice-explanation.visible { display: block; }
+
+    /* Loading state */
+    .loading-state { text-align: center; padding: 4rem 2rem; }
+    .loading-state .spinner-large { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 1rem; }
+    .loading-state p { color: var(--text-secondary); font-size: 0.95rem; }
+  </style>
+  <script>
+    window.__REVIEW__ = { attemptId: {{ attempt_id }} };
+  </script>
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <a href="/" class="brand" style="text-decoration:none;color:inherit">AI <span>Observer</span></a>
+      <a href="/student-dashboard" style="font-size:0.85rem;color:var(--text-secondary)">← Back to Dashboard</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="review-container">
+      <!-- Loading -->
+      <div id="loadingState" class="loading-state">
+        <div class="spinner-large"></div>
+        <p>🤖 AI Tutor is analyzing your performance…</p>
+        <p style="font-size:0.8rem;color:var(--muted);margin-top:0.5rem">This may take a few seconds as we cross-reference your answers with lecture materials.</p>
+      </div>
+
+      <!-- Review Content (hidden until loaded) -->
+      <div id="reviewContent" hidden>
+        <!-- Header -->
+        <div style="margin-bottom:2rem">
+          <h1 style="font-size:1.8rem;font-weight:800;margin:0 0 0.25rem;display:flex;align-items:center;gap:0.5rem">🤖 AI Tutor Review</h1>
+          <p id="reviewQuizTitle" style="font-size:1rem;color:var(--text-secondary);margin:0"></p>
+        </div>
+
+        <!-- Summary -->
+        <div class="card" style="margin-bottom:1.5rem;border-left:3px solid var(--accent)">
+          <p id="reviewSummary" style="font-size:0.95rem;margin:0;line-height:1.6"></p>
+        </div>
+        <div class="summary-grid" id="summaryGrid"></div>
+
+        <!-- Question breakdowns -->
+        <h2 style="font-size:1.2rem;font-weight:700;margin:0 0 1rem;display:flex;align-items:center;gap:0.5rem">📋 Question Breakdown</h2>
+        <div id="questionsContainer"></div>
+
+        <!-- Practice Quiz Section -->
+        <div class="practice-section" id="practiceSection">
+          <h2 style="font-size:1.2rem;font-weight:700;margin:0 0 0.5rem;display:flex;align-items:center;gap:0.5rem">🎯 Practice Quiz</h2>
+          <p style="color:var(--text-secondary);font-size:0.88rem;margin:0 0 1rem">Generate new questions similar to the ones you struggled with. No grades, no proctoring — just practice!</p>
+          <div class="row-actions" style="margin-bottom:1.5rem">
+            <button class="primary" id="generatePracticeBtn">Generate Practice Quiz</button>
+            <select id="practiceCount" style="width:auto;margin:0;padding:0.5rem 0.75rem">
+              <option value="3">3 Questions</option>
+              <option value="5" selected>5 Questions</option>
+              <option value="10">10 Questions</option>
+            </select>
+          </div>
+          <div id="practiceMsg" class="msg"></div>
+          <div id="practiceContainer"></div>
+          <div id="practiceActions" hidden style="margin-top:1rem">
+            <button class="primary" id="checkPracticeBtn">Check My Answers</button>
+            <button class="ghost" id="regenerateBtn">Generate New Questions</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error state -->
+      <div id="errorState" class="card" hidden style="text-align:center;padding:3rem">
+        <div style="font-size:3rem;margin-bottom:0.5rem;opacity:0.4">⚠️</div>
+        <p id="errorMsg" style="color:var(--danger);font-size:0.95rem"></p>
+        <a href="/student-dashboard" class="ghost" style="display:inline-block;margin-top:1rem;padding:0.5rem 1rem;border-radius:8px;border:1px solid var(--border);color:var(--text);text-decoration:none;font-weight:600">Back to Dashboard</a>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  (function(){
+    "use strict";
+    const $ = id => document.getElementById(id);
+    const attemptId = window.__REVIEW__.attemptId;
+    const email = sessionStorage.getItem("student_email");
+    const password = sessionStorage.getItem("student_password");
+
+    if(!email || !password) { window.location.href = "/"; return; }
+
+    async function jf(url, opts) {
+      const h = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
+      const r = await fetch(url, Object.assign({}, opts, {headers:h}));
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok){ const e=new Error(d.detail||"Request failed"); e.body=d; e.status=r.status; throw e; }
+      return d;
+    }
+
+    // Load review
+    async function loadReview(){
+      try {
+        const data = await jf(`/api/student/quiz/${attemptId}/review`, {
+          method: "POST",
+          body: JSON.stringify({ email, password })
+        });
+        $("loadingState").hidden = true;
+        $("reviewContent").hidden = false;
+        renderReview(data);
+      } catch(err) {
+        $("loadingState").hidden = true;
+        $("errorState").hidden = false;
+        $("errorMsg").textContent = err.body?.detail || err.message || "Failed to load review.";
+      }
+    }
+
+    function renderReview(data) {
+      $("reviewQuizTitle").textContent = `${data.quiz_title} — ${data.class_name}`;
+      $("reviewSummary").textContent = data.summary || "Review complete.";
+
+      // Summary stats
+      const weakCount = data.questions.filter(q => !q.is_correct || q.is_overtime).length;
+      $("summaryGrid").innerHTML = `
+        <div class="summary-stat"><div class="val">${data.score}/${data.total}</div><div class="lbl">Score</div></div>
+        <div class="summary-stat"><div class="val">${data.percentage}%</div><div class="lbl">Percentage</div></div>
+        <div class="summary-stat"><div class="val">${weakCount}</div><div class="lbl">Needs Review</div></div>
+        <div class="summary-stat"><div class="val">${data.time_limit_minutes || '∞'}</div><div class="lbl">Time Limit (min)</div></div>
+      `;
+
+      // Build explanation map
+      const explMap = {};
+      (data.ai_explanations || []).forEach(e => {
+        if(e.original_question_id) explMap[e.original_question_id] = e;
+      });
+
+      // Questions
+      const cont = $("questionsContainer");
+      let html = "";
+      data.questions.forEach((q, i) => {
+        const isWeak = !q.is_correct || q.is_overtime;
+        const delay = i * 0.08;
+
+        // Tags
+        let tags = "";
+        if(!q.is_correct) tags += '<span class="badge badge-wrong">Wrong</span>';
+        if(q.is_overtime) tags += '<span class="badge badge-overtime">Overtime</span>';
+        if(q.is_correct && !q.is_overtime) tags += '<span class="badge badge-correct">Correct</span>';
+
+        // Options
+        const opts = ["a","b","c","d"];
+        let optsHtml = "";
+        opts.forEach(o => {
+          let cls = "";
+          if(o === q.correct_option) cls = "correct-opt";
+          else if(o === q.student_answer && !q.is_correct) cls = "wrong-opt";
+          let indicator = "";
+          if(o === q.correct_option) indicator = '<div class="opt-indicator" style="background:var(--success);color:#fff">✓</div>';
+          else if(o === q.student_answer && !q.is_correct) indicator = '<div class="opt-indicator" style="background:var(--danger);color:#fff">✗</div>';
+          else indicator = '<div class="opt-indicator" style="border:1px solid var(--border)">' + o.toUpperCase() + '</div>';
+          optsHtml += `<div class="opt-item ${cls}">${indicator} <span>${q["option_"+o]}</span></div>`;
+        });
+
+        // Time bar
+        let timeHtml = "";
+        if(q.expected_time_seconds) {
+          const pct = Math.min(100, (q.time_spent_seconds / (q.expected_time_seconds * 2)) * 100);
+          const expectedPct = Math.min(100, (q.expected_time_seconds / (q.expected_time_seconds * 2)) * 100);
+          const barColor = q.is_overtime ? "var(--warn)" : "var(--success)";
+          timeHtml = `
+            <div class="time-bar-wrap">
+              <div class="time-bar-label">
+                <span>⏱ Time: ${q.time_spent_seconds}s</span>
+                <span>Expected: ~${q.expected_time_seconds}s</span>
+              </div>
+              <div class="time-bar">
+                <div class="fill" style="width:${pct}%;background:${barColor}"></div>
+                <div class="expected-mark" style="left:${expectedPct}%"></div>
+              </div>
+            </div>`;
+        }
+
+        // AI explanation
+        let aiHtml = "";
+        const expl = explMap[q.question_id];
+        if(expl) {
+          // Build lecture link
+          let lectureRefHtml = "";
+          if(expl.lecture_reference) {
+            const pageNum = expl.page_number || 1;
+            const highlightText = expl.highlight_text || "";
+            const lectureUrl = expl.lecture_url || "";
+            if(lectureUrl) {
+              let pdfLink = lectureUrl + "#page=" + pageNum;
+              if(highlightText) pdfLink += "&search=" + encodeURIComponent(highlightText);
+              lectureRefHtml = `<a class="lecture-ref" href="${pdfLink}" target="_blank" title="Open PDF at page ${pageNum}${highlightText ? ' — search: ' + highlightText : ''}">📖 ${expl.lecture_reference} <span class="ref-arrow">→</span></a>`;
+            } else {
+              lectureRefHtml = `<div class="lecture-ref" style="cursor:default">📖 ${expl.lecture_reference}</div>`;
+            }
+          }
+
+          aiHtml = `
+            <div class="ai-box">
+              <h4>🤖 AI Tutor</h4>
+              <p>${expl.explanation || ""}</p>
+              ${expl.correct_answer_explanation ? `<p><strong>Why it's correct:</strong> ${expl.correct_answer_explanation}</p>` : ""}
+              ${lectureRefHtml}
+              ${expl.highlight_text ? `<div style="margin-top:0.4rem;font-size:0.75rem;color:var(--muted);font-style:italic">🔍 Search term: "${expl.highlight_text}"</div>` : ""}
+              ${expl.study_tip ? `<div class="study-tip">💡 <strong>Tip:</strong> ${expl.study_tip}</div>` : ""}
+            </div>`;
+        }
+
+        html += `
+          <div class="card q-review" style="animation-delay:${delay}s;${!isWeak ? 'opacity:0.6;' : ''}">
+            <div class="q-header">
+              <span class="q-num">Question ${i+1}</span>
+              <div class="q-tags">${tags}</div>
+            </div>
+            <p style="font-size:0.95rem;margin:0 0 0.5rem;line-height:1.5">${q.question_text}</p>
+            <div class="opt-display">${optsHtml}</div>
+            ${timeHtml}
+            ${aiHtml}
+          </div>`;
+      });
+      cont.innerHTML = html;
+
+      // Trigger animations
+      setTimeout(() => {
+        document.querySelectorAll('.q-review').forEach(el => { el.style.opacity = '1'; el.style.transform = 'translateY(0)'; });
+      }, 100);
+    }
+
+    // Practice quiz
+    let practiceQuestions = [];
+    let practiceAnswers = {};
+
+    $("generatePracticeBtn").addEventListener("click", generatePractice);
+    $("regenerateBtn")?.addEventListener("click", generatePractice);
+
+    async function generatePractice() {
+      const numQ = parseInt($("practiceCount").value) || 5;
+      $("practiceMsg").textContent = "🤖 Generating practice questions…";
+      $("practiceMsg").className = "msg";
+      $("practiceContainer").innerHTML = "";
+      $("practiceActions").hidden = true;
+      practiceAnswers = {};
+
+      try {
+        const data = await jf(`/api/student/quiz/${attemptId}/practice`, {
+          method: "POST",
+          body: JSON.stringify({ email, password, num_questions: numQ })
+        });
+        if(!data.ok) throw new Error(data.error || "Generation failed");
+        practiceQuestions = data.questions || [];
+        if(!practiceQuestions.length) { $("practiceMsg").textContent = "No questions generated."; return; }
+        $("practiceMsg").textContent = "";
+        renderPracticeQuiz();
+        $("practiceActions").hidden = false;
+      } catch(err) {
+        $("practiceMsg").textContent = err.body?.detail || err.message || "Failed to generate practice quiz.";
+        $("practiceMsg").className = "msg error";
+      }
+    }
+
+    function renderPracticeQuiz() {
+      const cont = $("practiceContainer");
+      let html = "";
+      practiceQuestions.forEach((q, i) => {
+        const opts = ["a","b","c","d"];
+        html += `<div class="card practice-q" data-qi="${i}">
+          <div class="q-title">Practice ${i+1}. ${q.question_text}</div>
+          <div class="practice-opts">
+            ${opts.map(o => `<button class="practice-opt" data-qi="${i}" data-opt="${o}"><strong>${o.toUpperCase()}.</strong> ${q["option_"+o]}</button>`).join("")}
+          </div>
+          <div class="practice-explanation" id="pExpl_${i}">${q.explanation || ""}</div>
+        </div>`;
+      });
+      cont.innerHTML = html;
+
+      // Option click handlers
+      cont.querySelectorAll(".practice-opt").forEach(btn => {
+        btn.addEventListener("click", function() {
+          const qi = this.dataset.qi;
+          this.closest(".practice-opts").querySelectorAll(".practice-opt").forEach(b => b.classList.remove("p-selected"));
+          this.classList.add("p-selected");
+          practiceAnswers[qi] = this.dataset.opt;
+        });
+      });
+    }
+
+    $("checkPracticeBtn")?.addEventListener("click", () => {
+      practiceQuestions.forEach((q, i) => {
+        const card = document.querySelector(`.practice-q[data-qi="${i}"]`);
+        if(!card) return;
+        const btns = card.querySelectorAll(".practice-opt");
+        btns.forEach(btn => {
+          btn.disabled = true;
+          btn.style.cursor = "default";
+          const opt = btn.dataset.opt;
+          if(opt === q.correct_option) {
+            btn.classList.add("p-correct");
+          } else if(opt === practiceAnswers[i] && opt !== q.correct_option) {
+            btn.classList.add("p-wrong");
+          }
+        });
+        const expl = $("pExpl_" + i);
+        if(expl) expl.classList.add("visible");
+      });
+      $("checkPracticeBtn").hidden = true;
+    });
+
+    loadReview();
+  })();
+  </script>
+</body>
+</html>

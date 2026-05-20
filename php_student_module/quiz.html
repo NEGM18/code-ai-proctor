@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Session - AI Observer</title>
+    <link rel="stylesheet" href="css/theme.css">
+</head>
+<body>
+    <!-- AI Observer Camera Module -->
+    <div class="camera-module">
+        <video id="webcam" autoplay playsinline muted></video>
+        <div class="camera-overlay">AI OBSERVER ACTIVE</div>
+    </div>
+    <!-- Hidden canvas for capturing frames -->
+    <canvas id="snapshotCanvas" style="display:none;"></canvas>
+
+    <div class="container" style="max-width: 900px; padding-top: 4rem;">
+        <div class="glass-panel" id="quizContainer">
+            <div class="quiz-header">
+                <div>
+                    <h1 id="quizTitle" style="margin-bottom: 0;">Loading...</h1>
+                    <p id="quizClass" style="color: var(--text-muted);"></p>
+                </div>
+                <div class="timer">
+                    ⏳ <span id="timeRemaining">00:00</span>
+                </div>
+            </div>
+
+            <form id="quizForm">
+                <div id="questionsContainer">
+                    <p style="color: var(--text-muted);">Please wait while the quiz is loaded and the AI Observer initializes...</p>
+                </div>
+
+                <div style="margin-top: 3rem; text-align: right;">
+                    <button type="submit" class="btn btn-primary" id="submitBtn" disabled>Submit Quiz</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Cheating Penalty Overlay -->
+    <div id="cheatingOverlay" style="display: none;">
+        <h1>⚠️ VIOLATION DETECTED</h1>
+        <p style="font-size: 1.5rem; max-width: 600px;">
+            The AI Observer detected suspicious behavior or you attempted to leave the secure browser environment.
+        </p>
+        <p style="margin-top: 2rem; color: #ffb3b3;">This incident has been logged. The quiz is now locked.</p>
+        <button class="btn btn-primary" style="margin-top: 3rem;" onclick="window.location.href='dashboard.html'">Return to Dashboard</button>
+    </div>
+
+    <script src="js/quiz.js"></script>
+</body>
+</html>

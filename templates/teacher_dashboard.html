@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Teacher Dashboard — AI Observer</title>
+  <meta name="description" content="AI Observer teacher dashboard." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/exam_portal.css" />
+  <script>
+    window.__PORTAL__ = {
+      cheatThreshold: Number("{{ cheat_threshold }}"),
+      apiKeyRequired: "{{ 'true' if api_key_required else 'false' }}" === "true"
+    };
+  </script>
+  <style>
+    .class-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1.5rem}
+    .class-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;cursor:pointer;transition:transform .2s,border-color .2s,box-shadow .2s;display:flex;flex-direction:column}
+    .class-card:hover{transform:translateY(-4px);border-color:var(--accent);box-shadow:0 8px 24px rgba(230,57,70,.15)}
+    .class-card .card-banner{height:110px;background-size:40px 40px}
+    .class-card .card-body{padding:1.25rem;flex-grow:1;display:flex;flex-direction:column}
+    .class-card .card-body h3{margin:0 0 .25rem;font-size:1.15rem;color:#fff}
+    .class-card .card-body .meta{font-size:.8rem;color:var(--text-secondary)}
+    .class-card .card-body .code-badge{margin-top:auto;padding-top:.75rem;font-family:monospace;font-size:.85rem;color:var(--accent);font-weight:700}
+    .detail-breadcrumb{font-size:.85rem;color:var(--accent);margin-bottom:.35rem}
+    .detail-breadcrumb span{color:var(--text-secondary);margin:0 .4rem}
+    .detail-title{font-size:2rem;font-weight:800;color:#fff;margin:0 0 .25rem}
+    .detail-info{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.85rem;color:var(--text-secondary);margin-bottom:1.5rem}
+    .detail-info strong{color:var(--text)}
+    .detail-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:1.5rem;overflow-x:auto}
+    .detail-tabs button{padding:.75rem 1.25rem;border:none;background:none;color:var(--text-secondary);font-family:inherit;font-size:.88rem;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap}
+    .detail-tabs button:hover{color:var(--text)}
+    .detail-tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+    .moodle-section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:1rem;overflow:hidden}
+    .moodle-section .section-header{padding:1rem 1.5rem;background:rgba(255,255,255,.02);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+    .moodle-section .section-header h3{margin:0;font-size:1.1rem;display:flex;align-items:center;gap:.5rem}
+    .moodle-section .section-header h3 .chevron{color:var(--accent);transition:transform .2s;font-size:.8rem}
+    .moodle-section .section-header h3 .chevron.collapsed{transform:rotate(-90deg)}
+    .moodle-section .section-body{padding:1rem 1.5rem}
+    .moodle-section .section-body.collapsed{display:none}
+    .moodle-item{display:flex;align-items:center;gap:1rem;padding:.6rem 0;border-bottom:1px solid rgba(255,255,255,.04)}
+    .moodle-item:last-child{border-bottom:none}
+    .moodle-item .item-icon{width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:1rem;flex-shrink:0}
+    .moodle-item .item-label{font-weight:600;font-size:.95rem;color:#fff;cursor:pointer}
+    .moodle-item .item-badge{font-size:.75rem;color:var(--text-secondary);margin-left:.35rem}
+    .week-actions{display:flex;gap:.5rem;flex-wrap:wrap;padding:.75rem 0;margin-top:.5rem;border-top:1px solid rgba(255,255,255,.06)}
+    .week-actions button{font-size:.78rem;padding:.35rem .7rem}
+    .add-week-btn{width:100%;padding:.75rem;border:2px dashed var(--border);border-radius:var(--radius);background:none;color:var(--text-secondary);font-family:inherit;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s;margin-bottom:1rem}
+    .add-week-btn:hover{border-color:var(--accent);color:var(--accent)}
+    .quiz-inline-form{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:1.25rem;margin-top:.75rem}
+    .quiz-inline-form h4{margin:0 0 .75rem;font-size:1rem;color:var(--accent)}
+    .lecture-upload-area{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-top:.75rem;display:flex;align-items:center;gap:1rem}
+  </style>
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <a href="/" class="brand" style="text-decoration:none;color:inherit">AI <span>Observer</span></a>
+      <nav class="tabs" id="mainNav">
+        <button type="button" class="active" data-main-tab="classes">My Classes</button>
+        <button type="button" data-main-tab="camera">Quiz &amp; Camera</button>
+      </nav>
+      <div style="display:flex;align-items:center;gap:1rem">
+        <span style="font-size:.85rem;color:var(--text-secondary)">Teacher: <strong id="teacherHeaderName" style="color:var(--text)">—</strong></span>
+        <button type="button" class="ghost" id="teacherSignOutBtn" style="font-size:.78rem;padding:.35rem .75rem">Sign Out</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hidden compat for teacher_portal.js -->
+  <div id="teacherLoginCard" hidden><input id="tch_login_email" type="hidden"/><input id="tch_login_password" type="hidden"/><button id="teacherLoginBtn" hidden></button><button id="teacherLogoutBtn" hidden></button><div id="teacherLoginMsg" class="msg"></div></div>
+
+  <main><div id="teacherDashboard">
+
+  <!-- ============ VIEW 1: CLASSES GRID ============ -->
+  <div id="classesGridView">
+    <div class="grid-3" style="margin-bottom:1.5rem">
+      <div class="stat-card"><div class="stat-value" id="statClasses">0</div><div class="stat-label">Classes</div></div>
+      <div class="stat-card"><div class="stat-value" id="statQuizzes">0</div><div class="stat-label">Quizzes</div></div>
+      <div class="stat-card"><div class="stat-value" id="statAlerts">0</div><div class="stat-label">Alerts</div></div>
+    </div>
+    <div class="card">
+      <h2>Create Class</h2>
+      <div class="grid-2">
+        <div><label for="cls_name">Class Name</label><input id="cls_name" type="text" required/></div>
+        <div><label for="cls_password">Class Password</label><input id="cls_password" type="password" required/></div>
+      </div>
+      <div class="row-actions"><button type="button" class="primary" id="createClassBtn">Create Class</button></div>
+      <div id="classCreateMsg" class="msg"></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem"><h2 style="margin:0">My Classes</h2></div>
+      <div id="classesListContainer" class="class-grid"><div class="empty-state"><div class="empty-icon">📚</div><p>No classes yet</p></div></div>
+    </div>
+  </div>
+
+  <!-- ============ VIEW 2: CLASS DETAIL (MOODLE) ============ -->
+  <div id="classDetailView" hidden>
+    <div class="detail-breadcrumb">Faculty of Computer Science &amp; Engineering <span>/</span> Spring 25-26</div>
+    <h1 class="detail-title" id="detailClassName">—</h1>
+    <div class="detail-info">
+      <span>Code: <strong id="detailClassCode">—</strong></span>
+      <span>Password: <strong id="detailClassPw">—</strong></span>
+      <span>Students: <strong id="detailStudentCount">0</strong></span>
+    </div>
+    <div class="detail-tabs" id="detailTabs">
+      <button class="active" data-dtab="course">Course</button>
+      <button data-dtab="participants">Participants</button>
+      <button data-dtab="grades">Grades</button>
+      <button data-dtab="activities">Activities</button>
+    </div>
+
+    <!-- Course Tab -->
+    <div class="dtab-panel active" data-dpanel="course" id="panelCourse"></div>
+
+    <!-- Participants Tab -->
+    <div class="dtab-panel" data-dpanel="participants" style="display:none">
+      <div class="card"><h2>Enrolled Students</h2><div id="participantsList"><div class="empty-state"><div class="empty-icon">👥</div><p>No students enrolled yet</p></div></div></div>
+    </div>
+
+    <!-- Grades Tab -->
+    <div class="dtab-panel" data-dpanel="grades" style="display:none">
+      <div class="card">
+        <h2>Grades</h2><p class="sub">Select a quiz to view student grades.</p>
+        <label for="detail_grade_quiz">Select Quiz</label><select id="detail_grade_quiz"><option value="">— Choose quiz —</option></select>
+        <div class="row-actions"><button class="ghost" id="detailLoadGrades">Load Grades</button><button class="primary" id="detailExportGrades">Export CSV</button><button class="primary" id="detailAIInsights" style="background:linear-gradient(135deg,#6f42c1,#e63946);border:none">🤖 AI Insights</button></div>
+        <div id="detailGradesMsg" class="msg"></div>
+      </div>
+      <div class="card" id="detailGradesTableCard" hidden>
+        <div style="overflow-x:auto"><table class="grades-table"><thead><tr><th>Student ID</th><th>Name</th><th>Email</th><th>Score</th><th>%</th><th>Status</th></tr></thead><tbody id="detailGradesBody"></tbody></table></div>
+      </div>
+
+      <!-- AI Insights Panel -->
+      <div class="card" id="insightsPanel" hidden style="margin-top:1rem;border-left:3px solid #6f42c1">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+          <h2 style="margin:0;display:flex;align-items:center;gap:0.5rem">🤖 AI Teaching Insights</h2>
+          <button class="ghost" onclick="document.getElementById('insightsPanel').hidden=true" style="font-size:.78rem;padding:.3rem .65rem">Close</button>
+        </div>
+        <div id="insightsContent"></div>
+      </div>
+    </div>
+
+    <!-- Activities / Notifications Tab -->
+    <div class="dtab-panel" data-dpanel="activities" style="display:none">
+      <div class="card"><h2>Cheating Alerts</h2><p class="sub">Alerts for quizzes in this class.</p><div class="row-actions"><button class="ghost" id="detailRefreshNotifs">Refresh</button></div></div>
+      <div id="detailNotifsContainer"></div>
+    </div>
+
+    <!-- Question Builder Panel (appears when teacher clicks "Questions" on a quiz) -->
+    <div id="questionBuilderPanel" class="card" hidden style="margin-top:1.5rem;border-left:3px solid var(--accent)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <h2 style="margin:0;display:flex;align-items:center;gap:0.5rem">📝 Questions for: <span id="qbQuizTitle" style="color:var(--accent)">—</span></h2>
+        <button class="ghost" onclick="document.getElementById('questionBuilderPanel').hidden=true" style="font-size:.78rem;padding:.3rem .65rem">Close</button>
+      </div>
+
+      <!-- Existing questions list -->
+      <div id="qbExistingList" style="margin-bottom:1.5rem"></div>
+
+      <!-- Add new question form -->
+      <div style="border-top:1px solid var(--border);padding-top:1.25rem">
+        <h3 style="margin:0 0 1rem;font-size:1rem;color:var(--text-secondary)">Add New Question</h3>
+        <label for="qb_text">Question Text</label>
+        <textarea id="qb_text" rows="2" placeholder="Enter the question…"></textarea>
+        <div class="grid-2">
+          <div><label for="qb_a">Option A</label><input id="qb_a" type="text" placeholder="Option A" /></div>
+          <div><label for="qb_b">Option B</label><input id="qb_b" type="text" placeholder="Option B" /></div>
+        </div>
+        <div class="grid-2">
+          <div><label for="qb_c">Option C</label><input id="qb_c" type="text" placeholder="Option C" /></div>
+          <div><label for="qb_d">Option D</label><input id="qb_d" type="text" placeholder="Option D" /></div>
+        </div>
+        <div class="grid-2">
+          <div>
+            <label for="qb_correct">Correct Answer</label>
+            <select id="qb_correct">
+              <option value="a">A</option>
+              <option value="b">B</option>
+              <option value="c">C</option>
+              <option value="d">D</option>
+            </select>
+          </div>
+          <div>
+            <label for="qb_image">Question Image (optional)</label>
+            <input id="qb_image" type="file" accept="image/*" />
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="primary" id="qbAddBtn">Add Question</button>
+        </div>
+        <div id="qbMsg" class="msg"></div>
+      </div>
+    </div>
+
+    <button type="button" class="ghost" id="backToClassesBtn" style="margin-top:1.5rem">← Back to My Classes</button>
+  </div>
+
+  <!-- ============ CAMERA TAB ============ -->
+  <div id="cameraPanel" style="display:none">
+    <div id="quizModelBanner" class="model-banner" hidden></div>
+    <div class="card"><h2>Live Quiz Camera</h2><p class="sub">Frames sent to <code>/api/predict_batch</code></p><input type="hidden" id="apiKeyStore" value=""/><p class="hint">Threshold: <strong>{{ cheat_threshold }}</strong></p></div>
+    <div class="quiz-layout">
+      <div class="card">
+        <div class="video-wrap"><video id="quizVideo" class="mirror" playsinline muted></video><canvas id="quizCanvas" hidden></canvas><div class="badge-live" id="badgeLive">Live</div></div>
+        <div class="row-actions" style="margin-top:1rem;align-items:center">
+          <button class="primary" id="quizStartBtn">Start Camera</button><button class="ghost" id="quizStopBtn">Stop</button>
+          <label class="inline-label" for="quizInterval">Interval</label>
+          <select id="quizInterval"><option value="500">500ms</option><option value="1000" selected>1s</option><option value="1500">1.5s</option><option value="2000">2s</option></select>
+        </div>
+        <div id="quizMsg" class="msg"></div><p id="bufferProgress" class="hint" style="margin:.5rem 0 0;color:var(--warn);font-weight:600"></p>
+        <p style="margin:.5rem 0 0;font-size:.9rem">Avg P(cheat): <strong id="cheatProbText">—</strong></p>
+        <div class="meter"><span id="cheatMeter" style="width:0%"></span></div><p id="quizMeta" class="hint" style="margin:0"></p>
+      </div>
+      <div class="card"><h2>Alert Snapshots</h2><p class="sub">In-memory only.</p><div class="row-actions"><button class="ghost" id="clearSnapshotsBtn">Clear</button></div><div id="snapshotGallery" class="snapshots"></div></div>
+    </div>
+  </div>
+
+  <!-- Hidden compat elements for teacher_portal.js -->
+  <div hidden><span id="notifBadge"></span><div id="quizzesListContainer"></div><select id="quiz_class_id"></select><input id="quiz_title"/><textarea id="quiz_desc"></textarea><input id="quiz_time"/><input id="quiz_start_time"/><input id="quiz_end_time"/><button id="createQuizBtn"></button><div id="quizCreateMsg" class="msg"></div><div id="addQuestionCard" hidden><span id="questionQuizTitle"></span><div id="questionsList"></div><textarea id="q_text"></textarea><input id="q_a"/><input id="q_b"/><input id="q_c"/><input id="q_d"/><select id="q_correct"><option value="a">A</option><option value="b">B</option><option value="c">C</option><option value="d">D</option></select><input id="q_image" type="file"/><button id="addQuestionBtn"></button><div id="questionAddMsg" class="msg"></div></div><select id="grade_quiz_select"></select><button id="loadGradesBtn"></button><button id="exportGradesBtn"></button><div id="gradesMsg" class="msg"></div><div id="gradesTableCard" hidden><tbody id="gradesBody"></tbody></div><button id="refreshNotifsBtn"></button><div id="notifsContainer"></div></div>
+
+  </div></main>
+
+  <!-- Snapshot Modal -->
+  <div id="snapshotModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;flex-direction:column;padding:2rem">
+    <span style="position:absolute;top:20px;right:40px;color:white;font-size:40px;cursor:pointer" onclick="document.getElementById('snapshotModal').style.display='none'">&times;</span>
+    <img id="snapshotModalImg" style="max-width:90%;max-height:75%;object-fit:contain;border-radius:8px;box-shadow:0 10px 25px rgba(0,0,0,.5)"/>
+    <div id="snapshotModalAppeal" style="background:var(--bg-card);color:var(--text);padding:1rem;margin-top:1.5rem;border-radius:8px;max-width:800px;width:100%;text-align:left;display:none;border-left:4px solid var(--accent)"></div>
+  </div>
+
+  <script src="/static/js/teacher_portal.js"></script>
+  <script src="/static/js/teacher_detail.js"></script>
+</body>
+</html>

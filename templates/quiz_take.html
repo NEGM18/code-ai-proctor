@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Observer — Take Quiz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/exam_portal.css" />
+  <style>
+    .quiz-container { max-width: 900px; margin: 0 auto; }
+    .quiz-header { text-align: center; margin-bottom: 2rem; }
+    .quiz-header h1 { font-size: 1.6rem; font-weight: 800; margin: 0 0 0.35rem; }
+    .quiz-header .quiz-meta { color: var(--text-secondary); font-size: 0.88rem; }
+    .quiz-header .timer { font-size: 1.3rem; font-weight: 700; color: var(--accent); margin-top: 0.5rem; }
+    .q-card { margin-bottom: 1.25rem; }
+    .q-card .q-title { font-weight: 700; font-size: 1rem; margin-bottom: 0.75rem; }
+    .q-card .q-image { max-width: 300px; border-radius: 10px; margin-bottom: 0.75rem; border: 1px solid var(--border); }
+    .options { display: grid; gap: 0.5rem; }
+    .opt-btn {
+      display: block; width: 100%; text-align: left;
+      padding: 0.75rem 1rem; border-radius: var(--radius-sm);
+      border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+      color: var(--text); font-family: inherit; font-size: 0.92rem;
+      cursor: pointer; transition: all var(--transition);
+    }
+    .opt-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+    .opt-btn.selected { border-color: var(--accent); background: var(--accent-dim); box-shadow: 0 0 0 2px var(--accent-glow); }
+    .progress-bar { height: 4px; background: rgba(255,255,255,0.06); border-radius: 999px; margin-bottom: 1.5rem; overflow: hidden; }
+    .progress-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #ff6b6b); border-radius: 999px; transition: width 0.3s ease; }
+    .result-card { text-align: center; padding: 3rem 1.5rem; }
+    .result-score { font-size: 4rem; font-weight: 800; color: var(--accent); }
+    .result-label { font-size: 1.1rem; color: var(--text-secondary); margin-top: 0.5rem; }
+    .quiz-grid { display: grid; gap: 2rem; }
+    @media (min-width: 900px) { .quiz-grid { grid-template-columns: 1fr 360px; align-items: start; } }
+    .camera-col .card { margin-bottom: 1rem; }
+  </style>
+  <script>
+    window.__PORTAL__ = {
+      cheatThreshold: Number("{{ cheat_threshold }}"),
+      apiKeyRequired: "{{ 'true' if api_key_required else 'false' }}" === "true",
+      shareToken: "{{ share_token }}"
+    };
+  </script>
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <div class="brand">AI <span>Observer</span></div>
+      <a href="/" style="font-size:0.85rem;color:var(--text-secondary)">← Back to Portal</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="quiz-container">
+      <!-- Login -->
+      <div class="card" id="quizLoginCard">
+        <h2>Student Authentication</h2>
+        <p class="sub">Sign in with your student credentials to begin the quiz.</p>
+        <div class="grid-2">
+          <div><label for="qt_email">Email</label><input id="qt_email" type="email" /></div>
+          <div><label for="qt_password">Password</label><input id="qt_password" type="password" /></div>
+        </div>
+        <div class="row-actions"><button class="primary" id="qtLoginBtn">Start Quiz</button></div>
+        <div id="qtLoginMsg" class="msg"></div>
+      </div>
+
+      <!-- Quiz and Camera Grid (hidden until login) -->
+      <div class="quiz-grid" id="quizMainGrid" hidden>
+        <!-- Left Column: Quiz Content -->
+        <div id="quizContent">
+        <div class="quiz-header">
+          <h1 id="qtTitle">Quiz</h1>
+          <div class="quiz-meta" id="qtMeta"></div>
+          <div class="timer" id="qtTimer"></div>
+        </div>
+        <div class="progress-bar"><span id="qtProgress" style="width:0%"></span></div>
+        <div id="qtQuestions"></div>
+        <div class="row-actions" style="justify-content:center;margin-top:1.5rem">
+          <button class="ghost" id="qtPrevBtn" hidden>← Previous</button>
+          <button class="primary" id="qtNextBtn">Next →</button>
+          <button class="primary" id="qtSubmitBtn" hidden>Submit Quiz</button>
+        </div>
+        <div id="qtSubmitMsg" class="msg" style="text-align:center"></div>
+        </div>
+
+        <!-- Right Column: Camera UI -->
+        <div class="camera-col">
+          <div class="card">
+            <h2>Live Monitor</h2>
+            <div class="video-wrap" style="margin-top:0.75rem">
+              <video id="pipVideo" class="mirror" playsinline muted></video>
+              <canvas id="pipCanvas" hidden></canvas>
+              <video id="screenVideo" playsinline muted hidden></video>
+              <canvas id="screenCanvas" hidden></canvas>
+              <div class="badge-live on" id="badgeLive">Live</div>
+            </div>
+            <p style="margin:1rem 0 0.25rem;font-size:0.85rem">Avg P(cheating): <strong id="cheatProbText">—</strong></p>
+            <div class="meter"><span id="cheatMeter" style="width:0%"></span></div>
+            <p id="bufferProgress" class="hint" style="margin:0.25rem 0 0;color:var(--warn);font-weight:600"></p>
+            <p id="quizMeta" class="hint" style="margin:0"></p>
+            <div id="quizMsg" class="msg"></div>
+          </div>
+          <div class="card">
+            <h2>Alert Snapshots</h2>
+            <p class="sub">Captured when cheating is detected.</p>
+            <div id="snapshotGallery" class="snapshots" style="max-height:180px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Result -->
+      <div class="card result-card" id="quizResult" hidden>
+        <div class="result-score" id="qtScore">—</div>
+        <div class="result-label" id="qtResultLabel">Quiz completed</div>
+        
+        <div id="flaggedContainer" hidden style="margin-top:2rem;text-align:left;padding:1.5rem;border:1px solid rgba(239, 68, 68, 0.4);background:rgba(239, 68, 68, 0.05);border-radius:var(--radius-sm)">
+          <h3 style="color:var(--danger);margin:0 0 0.5rem;font-size:1.1rem;display:flex;align-items:center;gap:0.5rem">
+            ⚠️ Flagged for Suspicious Activity
+          </h3>
+          <p style="font-size:0.88rem;color:var(--text-secondary);margin:0 0 1rem">
+            The AI Observer detected potential academic dishonesty during this attempt. Your teacher has been notified. 
+            If you believe this is an error, you may file an appeal below.
+          </p>
+          <textarea id="appealText" placeholder="Explain your side of what happened..." style="min-height:80px;margin-bottom:0.75rem"></textarea>
+          <div class="row-actions">
+            <button class="primary" id="fileAppealBtn" style="background:var(--danger)">File Appeal</button>
+          </div>
+          <div id="appealMsg" class="msg"></div>
+        </div>
+
+        <a href="/" class="primary" style="display:inline-block;margin-top:1.5rem;padding:0.6rem 1.5rem;border-radius:10px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600">Back to Portal</a>
+        <a id="reviewLink" href="#" hidden class="ghost" style="display:inline-block;margin-top:1rem;padding:0.6rem 1.5rem;border-radius:10px;border:1px solid var(--accent);color:var(--accent);text-decoration:none;font-weight:600;margin-left:0.75rem;transition:all 0.2s">📚 Review My Performance</a>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  (function(){
+    "use strict";
+    const cfg = window.__PORTAL__ || {};
+    const token = cfg.shareToken;
+    const threshold = cfg.cheatThreshold || 0.8;
+    const $ = id => document.getElementById(id);
+    let questions = [], current = 0, attemptId = null, answers = {};
+    let timerInterval = null, timeLeft = 0;
+    let pipStream = null, pipTimer = null, frameBuffer = [];
+    let screenStream = null, currentEmail = null, quizSubmitted = false;
+    let questionEnteredAt = null;  // Track when student started viewing current question
+
+    function setMsg(id,t,c){ const e=$(id); if(e){e.textContent=t||"";e.className="msg"+(c?" "+c:"");} }
+
+    $("qtLoginBtn").addEventListener("click", async () => {
+      const email = $("qt_email").value.trim(), password = $("qt_password").value;
+      if(!email||!password){setMsg("qtLoginMsg","Enter credentials.","error");return;}
+      
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "monitor" } });
+        const track = screenStream.getVideoTracks()[0];
+        const settings = track.getSettings();
+        if (settings.displaySurface && settings.displaySurface !== "monitor") {
+          track.stop();
+          setMsg("qtLoginMsg", "You must choose 'Entire Screen'. Tabs or windows are not allowed.", "error");
+          return;
+        }
+        const sv = $("screenVideo"); sv.srcObject = screenStream; await sv.play();
+      } catch(e) {
+        setMsg("qtLoginMsg", "You must share your screen to take this exam.", "error");
+        return;
+      }
+      
+      currentEmail = email;
+      setMsg("qtLoginMsg","Loading quiz…","");
+      try {
+        // Fetch quiz data
+        const qr = await fetch("/api/quiz/"+token).then(r=>r.json());
+        if(!qr.ok) throw new Error(qr.detail||"Quiz not found");
+        questions = qr.questions || [];
+        $("qtTitle").textContent = qr.quiz.title;
+        $("qtMeta").textContent = qr.quiz.class_name + " · " + questions.length + " questions" +
+          (qr.quiz.time_limit_minutes ? " · " + qr.quiz.time_limit_minutes + " min" : "");
+
+        // Start attempt
+        const sr = await fetch("/api/quiz/"+token+"/start",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({email,password})}).then(r=>r.json());
+        if(!sr.ok) throw new Error(sr.detail||"Could not start quiz");
+        attemptId = sr.attempt_id;
+
+        // Show quiz
+        $("quizLoginCard").hidden = true;
+        $("quizMainGrid").hidden = false;
+        renderQuestion(0);
+
+        // Timer
+        if(qr.quiz.time_limit_minutes){
+          timeLeft = qr.quiz.time_limit_minutes * 60;
+          timerInterval = setInterval(()=>{
+            timeLeft--;
+            const m=Math.floor(timeLeft/60), s=timeLeft%60;
+            $("qtTimer").textContent = m+":"+(s<10?"0":"")+s;
+            if(timeLeft<=0){clearInterval(timerInterval);submitQuiz();}
+          },1000);
+        }
+
+        // Start proctoring camera
+        startProctoringCamera(email);
+      } catch(err) {
+        setMsg("qtLoginMsg",err.message||"Error","error");
+      }
+    });
+
+    function renderQuestion(idx){
+      current = idx;
+      const q = questions[idx];
+      if(!q) return;
+      // Record timing for previous question
+      if(questionEnteredAt !== null && current !== idx) {
+        // This won't fire on first render since questionEnteredAt is null
+      }
+      questionEnteredAt = new Date().toISOString();
+      $("qtProgress").style.width = ((idx+1)/questions.length*100)+"%";
+      $("qtQuestions").innerHTML = `
+        <div class="card q-card">
+          <div class="q-title">Question ${idx+1} of ${questions.length}</div>
+          ${q.image_path?'<img class="q-image" src="'+q.image_path+'" />':""}
+          <p style="margin:0 0 1rem;font-size:0.95rem">${q.question_text}</p>
+          <div class="options">
+            ${["a","b","c","d"].map(o=>`<button class="opt-btn${answers[q.id]===o?" selected":""}" data-opt="${o}" data-qid="${q.id}">
+              <strong>${o.toUpperCase()}.</strong> ${q["option_"+o]}
+            </button>`).join("")}
+          </div>
+        </div>`;
+      document.querySelectorAll(".opt-btn").forEach(b=>b.addEventListener("click",function(){
+        document.querySelectorAll(".opt-btn").forEach(x=>x.classList.remove("selected"));
+        this.classList.add("selected");
+        answers[this.dataset.qid] = this.dataset.opt;
+        // Submit answer in background
+        fetch("/api/quiz/answer",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({attempt_id:attemptId,question_id:parseInt(this.dataset.qid),selected_option:this.dataset.opt})});
+      }));
+      $("qtPrevBtn").hidden = idx===0;
+      $("qtNextBtn").hidden = idx===questions.length-1;
+      $("qtSubmitBtn").hidden = idx!==questions.length-1;
+    }
+
+    function recordCurrentTiming() {
+      if(questionEnteredAt && attemptId && questions[current]) {
+        const now = new Date().toISOString();
+        fetch("/api/quiz/timing", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            attempt_id: attemptId,
+            question_id: questions[current].id,
+            entered_at: questionEnteredAt,
+            answered_at: now
+          })
+        }).catch(e => console.warn("Timing record failed:", e));
+      }
+    }
+
+    $("qtPrevBtn").addEventListener("click",()=>{ recordCurrentTiming(); renderQuestion(current-1); });
+    $("qtNextBtn").addEventListener("click",()=>{ recordCurrentTiming(); renderQuestion(current+1); });
+    $("qtSubmitBtn").addEventListener("click",()=>{ recordCurrentTiming(); submitQuiz(); });
+
+    async function submitQuiz(){
+      if(quizSubmitted) return;
+      quizSubmitted = true;
+      if(timerInterval) clearInterval(timerInterval);
+      stopProctoring();
+      setMsg("qtSubmitMsg","Submitting…","");
+      try{
+        const r = await fetch("/api/quiz/attempt/"+attemptId+"/complete",{method:"POST"}).then(r=>r.json());
+        $("quizMainGrid").hidden = true;
+        $("quizResult").hidden = false;
+        $("qtScore").textContent = r.score+"/"+r.total;
+        $("qtResultLabel").textContent = "You scored "+r.percentage+"% on this quiz.";
+        
+        if (r.is_flagged) {
+          $("flaggedContainer").hidden = false;
+        }
+        // Show review link
+        const rl = $("reviewLink");
+        if(rl) { rl.href = "/student-review/" + attemptId; rl.hidden = false; rl.style.display = "inline-block"; }
+      }catch(e){ setMsg("qtSubmitMsg","Submit failed: "+e.message,"error"); }
+    }
+
+    $("fileAppealBtn")?.addEventListener("click", async () => {
+      const email = $("qt_email").value.trim();
+      const password = $("qt_password").value;
+      const appeal_text = $("appealText").value.trim();
+      if (!appeal_text) {
+        setMsg("appealMsg", "Please write an explanation.", "error");
+        return;
+      }
+      setMsg("appealMsg", "Submitting appeal...", "");
+      try {
+        const res = await fetch("/api/student/appeal", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            attempt_id: attemptId,
+            student_email: email,
+            student_password: password,
+            appeal_text: appeal_text
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Appeal failed");
+        setMsg("appealMsg", "Appeal submitted successfully. Your teacher will review it.", "ok");
+        $("appealText").disabled = true;
+        $("fileAppealBtn").disabled = true;
+      } catch (err) {
+        setMsg("appealMsg", err.message, "error");
+      }
+    });
+
+    /* ——— Proctoring camera (PiP) ——— */
+    async function startProctoringCamera(email){
+      try{
+        pipStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
+        const v = $("pipVideo"); v.srcObject = pipStream; await v.play();
+        pipTimer = setInterval(()=>captureProctorFrame(email),1200);
+      }catch(e){console.warn("Camera unavailable:",e);}
+    }
+
+    let snapshots = [];
+    function renderSnapshots() {
+      const root = $("snapshotGallery");
+      root.innerHTML = "";
+      snapshots.slice(0, 10).forEach(s => {
+        const wrap = document.createElement("div");
+        wrap.className = "snapshot-item";
+        wrap.style.display = "inline-block";
+        wrap.style.margin = "0 0.5rem 0.5rem 0";
+        wrap.style.width = "100px";
+        const img = document.createElement("img");
+        img.src = s.url;
+        img.className = "alert";
+        img.title = s.t + " max=" + s.maxP;
+        img.style.width = "100%";
+        img.style.borderRadius = "var(--radius-sm)";
+        img.style.border = "2px solid var(--danger)";
+        wrap.appendChild(img);
+        root.appendChild(wrap);
+      });
+    }
+
+    function captureProctorFrame(email){
+      const v=$("pipVideo"), c=$("pipCanvas");
+      if(!v.videoWidth) return;
+      const ctx=c.getContext("2d"), side=Math.min(v.videoWidth,v.videoHeight);
+      c.width=640; c.height=640;
+      ctx.drawImage(v,(v.videoWidth-side)/2,(v.videoHeight-side)/2,side,side,0,0,640,640);
+      c.toBlob(b=>{
+        if(b){
+          frameBuffer.push(b);
+          const el = $("bufferProgress");
+          if(el) el.textContent = "Buffering frame " + frameBuffer.length + "/10…";
+          if(frameBuffer.length>=10) sendProctorBatch(email);
+        }
+      },"image/jpeg",0.85);
+    }
+
+    let batchInFlight = false;
+    async function sendProctorBatch(email){
+      if(batchInFlight) return;
+      batchInFlight = true;
+      const batch=frameBuffer.splice(0);
+      const fd=new FormData();
+      batch.forEach((b,i)=>fd.append("files",b,"f_"+i+".jpg"));
+      const h={}; if(email) h["X-User-Email"]=email;
+      h["X-Client-Reference"]="quiz-take-proctor";
+      if(cfg.apiKeyRequired){const k=localStorage.getItem("proctor_api_key");if(k)h["X-API-Key"]=k;}
+      const t0 = performance.now();
+      try {
+        const res = await fetch("/api/predict_batch",{method:"POST",body:fd,headers:h});
+        const data = await res.json();
+        
+        const avgP = data.avg_cheat_probability ?? 0;
+        const maxP = data.max_cheat_probability ?? 0;
+        $("cheatProbText").textContent = avgP.toFixed(4);
+        $("cheatMeter").style.width = Math.min(100, avgP * 100) + "%";
+        
+        const ms = Math.round(performance.now() - t0);
+        $("quizMeta").textContent = "window=" + (data.window_size || batch.length) + "  avg=" + avgP.toFixed(3) + "  max=" + maxP.toFixed(3) + "  " + ms + "ms";
+        
+        if (data.alert) {
+          setMsg("quizMsg", "ALERT — cheating detected", "error");
+          
+          if (data.best_snapshot_b64) {
+            snapshots.unshift({
+              url: "data:image/jpeg;base64," + data.best_snapshot_b64,
+              t: data.timestamp,
+              maxP: maxP.toFixed(4)
+            });
+            renderSnapshots();
+          }
+
+          fetch("/api/cheating/report", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+              student_email: email,
+              attempt_id: attemptId,
+              cheat_probability: data.max_cheat_probability,
+              snapshot_b64: data.best_snapshot_b64
+            })
+          }).catch(e => console.error("Report failed", e));
+        } else {
+          setMsg("quizMsg", "Live — batched inference", "ok");
+        }
+      } catch(e) { 
+        console.error("Proctoring error:", e);
+        setMsg("quizMsg", "Proctoring error: " + e.message, "error");
+      } finally {
+        batchInFlight = false;
+        const el = $("bufferProgress");
+        if(el) el.textContent = "";
+      }
+    }
+
+    function stopProctoring(){
+      if(pipTimer){clearInterval(pipTimer);pipTimer=null;}
+      if(pipStream){pipStream.getTracks().forEach(t=>t.stop());pipStream=null;}
+      if(screenStream){screenStream.getTracks().forEach(t=>t.stop());screenStream=null;}
+    }
+
+    function reportScreenCheat(reason) {
+      if (!attemptId || !currentEmail || quizSubmitted) return;
+      setTimeout(() => {
+        const sv = $("screenVideo");
+        const sc = $("screenCanvas");
+        if (!sv || !sv.videoWidth) return;
+        const ctx = sc.getContext("2d");
+        sc.width = sv.videoWidth;
+        sc.height = sv.videoHeight;
+        ctx.drawImage(sv, 0, 0, sc.width, sc.height);
+        sc.toBlob(b => {
+          if (!b) return;
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const b64 = reader.result.split(',')[1];
+            fetch("/api/cheating/report", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({
+                student_email: currentEmail,
+                attempt_id: attemptId,
+                cheat_probability: 1.0,
+                snapshot_b64: b64
+              })
+            }).then(() => {
+               setMsg("quizMsg", "ALERT — " + reason + " detected", "error");
+               $("flaggedContainer").hidden = false;
+            }).catch(console.error);
+          };
+          reader.readAsDataURL(b);
+        }, "image/jpeg", 0.7);
+      }, 500);
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden && attemptId && !quizSubmitted) {
+        reportScreenCheat("Tab switch");
+      }
+    });
+
+    window.addEventListener("blur", () => {
+      if (attemptId && !quizSubmitted) {
+        reportScreenCheat("Window unfocused");
+      }
+    });
+  })();
+  </script>
+</body>
+</html>
