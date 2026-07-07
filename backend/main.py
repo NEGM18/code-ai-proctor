@@ -26,13 +26,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import database
-from auth_passwords import hash_password, verify_password
+from backend.core.security import hash_password, verify_password
 from cheating_detector import CheatingDetector
 from model_paths import effective_model_path
 
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ROOT.parent
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 
 DEVICE = os.environ.get("PROCTOR_DEVICE")
@@ -48,7 +49,7 @@ _detector_weights: Path | None = None
 
 def resolved_model_path() -> Path:
     """Re-evaluated so new files under weights/ or runs/ are picked up without restarting."""
-    return effective_model_path(ROOT)
+    return effective_model_path(PROJECT_ROOT)
 
 
 def get_detector() -> CheatingDetector:
@@ -715,7 +716,7 @@ def api_teacher_export_grades(quiz_id: int, teacher_email: str, teacher_password
 def api_teacher_quiz_insights(quiz_id: int, body: TeacherLoginRequest, db: DbSession) -> dict:
     """AI-powered teaching insights for a quiz based on student answer patterns."""
     _auth_teacher(db, body.email, body.password)
-    import ai_tutor
+    from backend.services import ai_tutor
     return ai_tutor.analyze_quiz_for_teacher(db, quiz_id)
 
 
@@ -857,7 +858,7 @@ def api_student_quiz_review(attempt_id: int, body: ReviewRequest, db: DbSession)
         raise HTTPException(status_code=404, detail="Attempt not found")
     if attempt.status != "completed":
         raise HTTPException(status_code=400, detail="Quiz not completed yet")
-    import ai_tutor
+    from backend.services import ai_tutor
     result = ai_tutor.analyze_quiz_performance(db, attempt_id)
     return {"ok": True, **result}
 
@@ -879,7 +880,7 @@ def api_student_practice_quiz(attempt_id: int, body: PracticeQuizRequest, db: Db
         raise HTTPException(status_code=404, detail="Attempt not found")
     if attempt.status != "completed":
         raise HTTPException(status_code=400, detail="Quiz not completed yet")
-    import ai_tutor
+    from backend.services import ai_tutor
     result = ai_tutor.generate_practice_quiz(db, attempt_id, body.num_questions)
     return result
 

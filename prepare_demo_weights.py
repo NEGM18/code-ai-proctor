@@ -90,7 +90,7 @@ def main() -> None:
     dest = WEIGHTS_DIR / "best.pt"
     shutil.copy2(trained_best, dest)
     print(f"Copied demo weights to {dest}")
-    print("Start the server: uvicorn proctor_app:app --host 127.0.0.1 --port 8000")
+    print("Start the server: uvicorn backend.main:app --host 127.0.0.1 --port 8000")
     print("Then open the Quiz tab; inference uses this file unless PROCTOR_MODEL_PATH is set.")
 
 

@@ -103,7 +103,7 @@ Set `PROCTOR_API_KEY` (optional but recommended). Set `PROCTOR_MODEL_PATH` only 
 
 ```bash
 set PROCTOR_API_KEY=your-secret
-uvicorn proctor_app:app --host 0.0.0.0 --port 8000
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
 
 Open http://127.0.0.1:8000/ for the UI. POST `/api/predict` with multipart field `file` and header `X-API-Key` when configured.
@@ -158,7 +158,7 @@ You should see `ODBC Driver 18 for SQL Server` in the list. If you only have **1
 The UI is a normal web page served by FastAPI. Start the API on the machine where your trained weights live:
 
 ```bash
-uvicorn proctor_app:app --host 127.0.0.1 --port 8000
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 Then open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) in a browser. The **Quiz & camera** tab captures frames with `getUserMedia` and POSTs them to `/api/predict` on that same host, so **YOLO inference runs in your local Python process** (not a hosted “cloud model” API). Training is still done separately with `train_cheating_yolo.py` on your machine.

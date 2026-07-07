@@ -36,7 +36,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
-from auth_passwords import hash_password, verify_password
+from backend.core.security import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 
