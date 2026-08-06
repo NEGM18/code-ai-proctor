@@ -2045,13 +2045,38 @@ async function initVisionEngine(url) {
       } else {
         postVisionStatus('ONLINE', `delegate=${delegate}`);
       }
-      const targetMs = accelerated ? 66 : 100;   // ~15 FPS vs ~10 FPS
+      // ── Guest tick budget: 15 FPS on BOTH delegates ──────────────────────
+      //
+      // CPU used to get 100 ms (~10 FPS) on the assumption that a WASM delegate
+      // could not hold 15. That was over-cautious: the guest pipeline is
+      // MediaPipe ONLY — `offlineOnly` means pose.onnx and detect.onnx are never
+      // fetched and best.onnx is skipped outright — so a guest tick is one
+      // FaceLandmarker pass, not the three-graph load the 100 ms was sized for.
+      //
+      // ⚠ WHY A TIGHTER TARGET CANNOT PILE UP FRAMES. The loop is a
+      // self-scheduling setTimeout measured FROM COMPLETION, never setInterval:
+      //
+      //     scheduleNextInference(max(proctorMinGapMs, proctorIntervalMs - lastInferenceMs))
+      //
+      // A machine that cannot hold the cadence therefore runs SLOWER; it can
+      // never queue a tick it has not finished, so there is no buffer to build
+      // up. `proctorIntervalMs` is a target, not a promise, and
+      // `MIN_IDLE_FRACTION` is the real protection — it guarantees a floor of
+      // idle time after every pass however long that pass took, so the
+      // compositor always gets the camera feed painted. Two further nets sit
+      // behind it: `inferenceInFlight` (no re-entry) and
+      // `maybeRetierForMeasuredCost()` (8 consecutive overruns -> adopt
+      // measured x1.35), which is what catches a machine slower than this
+      // assumption rather than letting it saturate a core.
+      const targetMs = 66;                  // ~15 FPS, both delegates
+      const MIN_IDLE_FRACTION = 0.6;        // >=40 ms idle after every pass
       if (proctorIntervalMs < targetMs) {
         proctorIntervalMs = targetMs;
-        proctorMinGapMs = Math.max(proctorMinGapMs, Math.round(targetMs * 0.6));
+        proctorMinGapMs = Math.max(proctorMinGapMs, Math.round(targetMs * MIN_IDLE_FRACTION));
         console.log(
           `[AI Observer] Guest Mode: capping inference at ~${Math.round(1000 / targetMs)} FPS `
-          + `(MediaPipe delegate: ${delegate || 'none'}) to keep the exam UI responsive.`
+          + `(MediaPipe delegate: ${delegate || 'none'}${accelerated ? '' : ', CPU fallback'}) `
+          + `to keep the exam UI responsive.`
         );
       }
     }
