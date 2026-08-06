@@ -1,0 +1,9 @@
+# SPA fallback for Cloudflare Pages. This app has real routes now (/privacy,
+# /terms, /accessibility, /data-retention — see src/lib/route.js) but is
+# still a single static build with no server-side router. Without this file, a
+# direct request or a browser refresh on any of those paths 404s, because
+# Cloudflare Pages otherwise only serves files that actually exist on disk.
+# Client-side <Link> navigation would keep working even without this — it
+# never leaves the already-loaded index.html — which is exactly why this is
+# easy to forget: it only breaks on direct nav/refresh/shared links.
+/*    /index.html   200

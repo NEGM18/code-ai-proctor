@@ -1,0 +1,228 @@
+{
+  "_": "Provenance for the six vision modules ported from the READ-ONLY extension tree.",
+  "_generatedBy": "Phase 1 of safe-test-dashboard/PLAN.md",
+  "_verifiedBy": "scripts/check-vision-sync.mjs",
+  "upstreamRoot": "../extension/content/vision",
+  "sentinels": {
+    "open": "// >>> ESM PORT",
+    "close": "// <<< ESM PORT",
+    "_": "A line whose TRIMMED text equals `open` starts a ported-edit block; the next line whose trimmed text equals `close` ends it. Both delimiter lines and everything between them are EXCLUDED from the hash. Every other line in the ported file must be byte-identical to the upstream body region below."
+  },
+  "hash": {
+    "algorithm": "sha256",
+    "encoding": "hex",
+    "normalization": [
+      "1. Read the file as UTF-8.",
+      "2. Strip a leading U+FEFF byte-order mark if present (none of the six have one).",
+      "3. Normalize line endings to LF: every CR LF pair becomes LF, then every remaining lone CR becomes LF. The upstream working tree is LF today, but git core.autocrlf=true on this machine can check the extension out as CRLF, so the port must not depend on which it gets.",
+      "4. Split on LF, then drop a single trailing empty element produced by the file-final newline, so array index i corresponds to 1-based line i+1.",
+      "5. UPSTREAM SIDE: concatenate the lines of every range in bodyRanges (1-based, inclusive, in the order listed).",
+      "6. PORTED SIDE: take every line of src/vision/<file> that is NOT inside a sentinel block.",
+      "7. Both sides: join the lines with LF and append exactly one trailing LF.",
+      "8. sha256 over the UTF-8 bytes of that string; compare hex digests."
+    ],
+    "_note": "Steps 5 and 6 must produce the identical string. The per-file sha256 below is that digest, recorded at port time from the upstream side.",
+    "_ranges": "bodyRanges covers EVERY upstream line the ported file retains, including the file header above the module wrapper. The gaps between ranges are listed in removedFromUpstream and are exactly the UMD/global-export plumbing that the ESM wrapper replaces."
+  },
+  "files": [
+    {
+      "file": "temporal_gate.js",
+      "group": "plain-script",
+      "upstream": "extension/content/vision/temporal_gate.js",
+      "upstreamTotalLines": 232,
+      "bodyRanges": [
+        [
+          1,
+          230
+        ]
+      ],
+      "removedFromUpstream": [
+        [
+          231,
+          232
+        ]
+      ],
+      "sha256": "2f7cefde7a8be9ff94303079333d32ac0bdd65db9a9107b1bc4728a85e6ace9a",
+      "exports": [
+        "DEFAULT_SMOOTHER_OPTS",
+        "DEFAULT_GATE_OPTS",
+        "GateState",
+        "TemporalSmoother",
+        "DwellGate"
+      ]
+    },
+    {
+      "file": "pose_calibration.js",
+      "group": "plain-script",
+      "upstream": "extension/content/vision/pose_calibration.js",
+      "upstreamTotalLines": 269,
+      "bodyRanges": [
+        [
+          1,
+          267
+        ]
+      ],
+      "removedFromUpstream": [
+        [
+          268,
+          269
+        ]
+      ],
+      "sha256": "cad074005b99f7a364a4d69fe794a26f18aca0231aa62496739b8175ac5ea6a7",
+      "exports": [
+        "DEFAULT_CALIBRATION_OPTS",
+        "PoseBaseline",
+        "median",
+        "medianAbsoluteDeviation"
+      ]
+    },
+    {
+      "file": "pose_geometry.js",
+      "group": "plain-script",
+      "upstream": "extension/content/vision/pose_geometry.js",
+      "upstreamTotalLines": 208,
+      "bodyRanges": [
+        [
+          1,
+          206
+        ]
+      ],
+      "removedFromUpstream": [
+        [
+          207,
+          208
+        ]
+      ],
+      "sha256": "6dc87522c5f55f1421f9fed64f9f8273caf86858998323cb7f35f0dc4f4c4535",
+      "exports": [
+        "KP",
+        "POSE_INVALID",
+        "DEFAULT_POSE_OPTS",
+        "RATIO_TO_DEG",
+        "dist",
+        "midpoint",
+        "computeHeadPose",
+        "ratioToApproxDegrees"
+      ]
+    },
+    {
+      "file": "gaze_landmarks.js",
+      "group": "umd",
+      "upstream": "extension/content/vision/gaze_landmarks.js",
+      "upstreamTotalLines": 613,
+      "bodyRanges": [
+        [
+          1,
+          34
+        ],
+        [
+          51,
+          593
+        ]
+      ],
+      "removedFromUpstream": [
+        [
+          35,
+          50
+        ],
+        [
+          594,
+          613
+        ]
+      ],
+      "sha256": "3348de2ca4fea5dd378f2dd3dd63cc3852829400f7eb120a4ebb4364c7f5dc13",
+      "exports": [
+        "LANDMARK_CONTRACT",
+        "GAZE_STATE",
+        "GAZE_INVALID",
+        "DEFAULT_LANDMARK_OPTS",
+        "DEFAULT_LANDMARK_CALIBRATION",
+        "DEFAULT_LANDMARK_GATE",
+        "GazeCondition",
+        "dist",
+        "projectionRatio",
+        "eyeAspectRatio",
+        "orientedGazeRatio",
+        "verticalIrisRatio",
+        "analyzeEye",
+        "analyzeGazeLandmarks",
+        "classifyAbsolute",
+        "isOffAxisAbsolute",
+        "GazeLandmarkAnalyzer"
+      ]
+    },
+    {
+      "file": "ear_veto.js",
+      "group": "umd",
+      "upstream": "extension/content/vision/ear_veto.js",
+      "upstreamTotalLines": 743,
+      "bodyRanges": [
+        [
+          1,
+          50
+        ],
+        [
+          66,
+          729
+        ]
+      ],
+      "removedFromUpstream": [
+        [
+          51,
+          65
+        ],
+        [
+          730,
+          743
+        ]
+      ],
+      "sha256": "bd3a781a63ba6c318974f2bad54a6726a242c97a3a59441463a6eb3f20978651",
+      "exports": [
+        "VETOABLE_VIOLATIONS",
+        "NEVER_VETOABLE",
+        "DEFAULT_VETO_OPTS",
+        "VETO_REASON",
+        "computeFaceEar",
+        "GLANCE_CLASS",
+        "KEYBOARD_VETO_DEFAULTS",
+        "classifyGlance",
+        "isForgivableGlance",
+        "KeyboardGlancePermit",
+        "EarVetoGate"
+      ]
+    },
+    {
+      "file": "pose_pipeline.js",
+      "group": "umd",
+      "upstream": "extension/content/vision/pose_pipeline.js",
+      "upstreamTotalLines": 273,
+      "bodyRanges": [
+        [
+          1,
+          22
+        ],
+        [
+          42,
+          271
+        ]
+      ],
+      "removedFromUpstream": [
+        [
+          23,
+          41
+        ],
+        [
+          272,
+          273
+        ]
+      ],
+      "sha256": "7d0aa5af4777293cbad4ac37704c914a14c85bbe7bfbd924dc39d14a2cc73541",
+      "exports": [
+        "PoseCondition",
+        "PipelineStatus",
+        "DEFAULT_PIPELINE_OPTS",
+        "HeadPoseAnalyzer"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Model weights
+*.pt
+weights/*.pt
+
+# Datasets
+runs/
+demo_proctor_dataset/
+master_proctor_dataset/
+_unlabeled_review/
+online exam cheating detection.v15i.folder/
+
+# Database files
+*.db
+*.sqlite
+
+# Uploads
+uploads/
+
+# Misc
+# The blanket image rules exist to keep dataset frames and scratch screenshots
+# out of the repo. They are NOT meant to catch authored UI assets, and they were
+# silently excluding two sets that the app cannot run without.
+*.jpg
+*.png
+*.jpeg
+
+# Authored UI assets — required at runtime, so they must be tracked.
+# manifest.json declares the three icon sizes by name; without them Chrome
+# refuses to load the unpacked extension. The brand logo is referenced by five
+# components via /brand/, so an untracked copy means a clean clone builds
+# successfully and then renders broken images.
+!extension/assets/*.png
+!safe-test-dashboard/public/brand/*.png

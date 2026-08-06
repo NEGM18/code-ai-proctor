@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "AI Observer — Proctoring & Analytics",
+  "version": "2.0.0",
+  "description": "Enterprise AI-driven proctoring and classroom analytics extension for LMS platforms. Runs local vision models via WebGPU/WASM.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "downloads"
+  ],
+  "host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "background/worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.pages.dev/*", "https://safetest.space/*", "https://procminds.com/*", "https://www.procminds.com/*", "http://localhost:*/*", "http://127.0.0.1:*/*"],
+      "js": [
+        "lib/ort.min.js",
+        "lib/tasks-vision.js",
+        "content/supabase_rest.js",
+        "content/lms_detector.js",
+        "content/secure_loader.js",
+        "content/mediapipe_source.js",
+        "content/vision/runtime_profile.js",
+        "content/onnx_inference.js",
+        "content/vision/pose_geometry.js",
+        "content/vision/pose_calibration.js",
+        "content/vision/temporal_gate.js",
+        "content/vision/pose_pipeline.js",
+        "content/vision/gaze_roi.js",
+        "content/vision/gaze_landmarks.js",
+        "content/vision/ear_veto.js",
+        "content/vision/detectors.js",
+        "content/vision/vision_engine.js",
+        "content/lighting_checker.js",
+        "content/liveness_challenge.js",
+        "content/monitor.js",
+        "content/role_router.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.pages.dev/*", "https://safetest.space/*", "https://procminds.com/*", "https://www.procminds.com/*", "http://localhost:*/*", "http://127.0.0.1:*/*"],
+      "js": ["content/guest_bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "AI Observer"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "lib/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  }
+}

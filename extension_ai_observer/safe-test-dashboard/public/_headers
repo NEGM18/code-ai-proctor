@@ -1,0 +1,38 @@
+# Cloudflare Pages response headers.
+#
+# ─── Cross-origin isolation ──────────────────────────────────────────────────
+#
+# The AI Observer extension's ONNX Runtime asks for 2 WASM threads on Tier B,
+# but resolveThreadCount() returns 1 unless SharedArrayBuffer exists AND the
+# document is cross-origin isolated. Without these two headers the browser
+# refuses both, and the extension logs:
+#
+#   [Runtime] Tier B asked for 2 WASM threads but got 1 (COOP/COEP missing)
+#
+# Serving them makes `crossOriginIsolated` true, so SharedArrayBuffer is
+# available and the thread request can actually be honoured.
+#
+# ⚠ TWO CONSEQUENCES, BOTH DELIBERATE — READ BEFORE CHANGING.
+#
+# 1. `require-corp` blocks EVERY cross-origin subresource that does not send
+#    `Cross-Origin-Resource-Policy`. The only such resource this app loads is a
+#    Supabase Storage signed-URL image in the evidence panels, and Supabase does
+#    not send CORP. Those panels therefore prefer the inline base64 snapshot
+#    (a data: URL, which COEP exempts) and fall back to the signed URL only when
+#    no inline copy exists — see EvidencePanel.jsx. Fonts are bundled locally
+#    via @fontsource and index.html loads nothing cross-origin, so nothing else
+#    is affected. If a future feature adds a cross-origin image, script or
+#    iframe, it will be BLOCKED here and the fix is CORP on that resource — or
+#    switching to `credentialless`, which grants isolation without requiring
+#    CORP, at the cost of sending those requests without credentials.
+#
+# 2. Cross-origin isolation is what lets ORT request a second WASM thread, and
+#    CLAUDE.md records that forcing 2 threads previously broke ORT loading
+#    outright (it spawns a proxy worker whose .mjs dynamic import fails inside
+#    the content-script world). The guest demo does not use ORT at all — it runs
+#    the bundled MediaPipe landmarker — so it cannot hit that. A real proctored
+#    exam served from this origin could. Watch for a failed ORT session here
+#    before assuming these headers are free.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Observer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="glass-card">
+    <div class="header">
+      <div class="logo">
+        <span class="ai-text">AI</span> Observer
+      </div>
+      <div class="badge" id="badge-status">Disconnected</div>
+    </div>
+
+    <!-- Login View -->
+    <div id="login-view" class="view active">
+      <h3>Sign In</h3>
+      <p class="subtitle">Authenticate to start your session</p>
+
+      <!-- Role Toggle -->
+      <div class="role-toggle">
+        <button class="role-btn active" id="role-student-btn" data-role="student">Student</button>
+      </div>
+
+      <div class="input-group">
+        <label>Email Address</label>
+        <input type="email" id="email-input" placeholder="e.g. teacher or teacher@gmail.com">
+      </div>
+
+      <div class="input-group">
+        <label>Password</label>
+        <input type="password" id="password-input" placeholder="••••••••">
+      </div>
+
+      <!-- The "Server URL" field was here. It is deliberately gone: the backend
+           is a build constant in supabase_rest.js, and a free-text host box on a
+           form that also collects a password is a credential-harvesting surface
+           — anyone who can persuade a student to paste a different URL collects
+           their login. -->
+
+      <button id="login-btn" class="primary-btn">Sign In</button>
+      <div id="login-error" class="error-msg"></div>
+    </div>
+
+    <!-- Student Control View -->
+    <div id="student-control-view" class="view">
+      <div class="student-info">
+        <div id="student-name-display" class="name">Student Name</div>
+        <div id="student-id-display" class="id">Student ID: Loading...</div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="input-group">
+        <label>Proctoring Session Code</label>
+        <input type="text" id="session-code-input" placeholder="e.g. PVXX1O" maxlength="10">
+        <div id="code-policy-hint" class="error-msg" style="display:none"></div>
+      </div>
+
+      <!-- Shown only when the looked-up ProctorCode has require_student_id.
+           Hidden by default and never collected speculatively: asking every
+           student for an institutional number that most sittings will not use
+           is an unnecessary collection of identifying data. -->
+      <div class="input-group" id="university-id-group" style="display:none">
+        <label>University Student ID</label>
+        <input type="text" id="university-id-input" placeholder="e.g. 20241234" maxlength="40">
+      </div>
+
+      <div class="status-checklist">
+        <div class="checklist-item" id="chk-camera">
+          <span class="chk-icon">✕</span>
+          <span class="chk-label">Webcam Permission</span>
+        </div>
+        <div class="checklist-item" id="chk-screen">
+          <span class="chk-icon">✕</span>
+          <span class="chk-label">Screen Share Stream</span>
+        </div>
+        <div class="checklist-item" id="chk-fullscreen">
+          <span class="chk-icon">✕</span>
+          <span class="chk-label">Fullscreen Mode</span>
+        </div>
+      </div>
+
+      <div class="provider-badge" id="provider-badge">
+        <span class="provider-icon">⚡</span>
+        <span id="provider-label">Detecting GPU...</span>
+      </div>
+
+      <button id="start-btn" class="primary-btn pulse-glow">Start Proctoring</button>
+      <button id="stop-btn" class="secondary-btn hidden">Stop Proctoring</button>
+      <button id="logout-btn" class="text-btn">Sign Out</button>
+      <div id="control-error" class="error-msg"></div>
+    </div>
+
+    <!-- Guest Control View -->
+    <div id="guest-control-view" class="view">
+      <div class="student-info">
+        <div class="name">Guest Demo Mode</div>
+        <div class="id">Anonymous Proctoring Session</div>
+      </div>
+
+      <hr class="divider">
+
+      <p class="subtitle" style="margin-bottom: 12px; color: #a1a1aa; font-size: 11px;">
+        Proctoring is active in guest mode. Zero sign-in or student credentials required.
+      </p>
+
+      <div class="status-checklist">
+        <div class="checklist-item verified">
+          <span class="chk-icon">✓</span>
+          <span class="chk-label">Webcam Monitoring Active</span>
+        </div>
+        <div class="checklist-item verified">
+          <span class="chk-icon">✓</span>
+          <span class="chk-label">Local Dashboard Relay Active</span>
+        </div>
+        <div class="checklist-item verified">
+          <span class="chk-icon">✓</span>
+          <span class="chk-label">Student Auth Bypassed</span>
+        </div>
+      </div>
+
+      <button id="guest-stop-btn" class="secondary-btn" style="margin-top: 12px;">Exit Guest Demo Mode</button>
+    </div>
+
+  </div>
+
+
+  <!-- The popup page is its own JS world — it cannot see globals defined by a
+       content script, so supabase_rest.js is loaded here as well as in the
+       manifest. Same file, two worlds, one definition of the auth plumbing. -->
+  <script src="../content/supabase_rest.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

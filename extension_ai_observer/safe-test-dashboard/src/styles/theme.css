@@ -1,0 +1,291 @@
+/* ==========================================================================
+   safetest.space — design tokens (PLAN.md §4)
+   Tailwind v4: tokens are declared here with @theme, not in a JS config.
+
+   The palette is derived from the product's ethic — an instrument that refuses
+   to fake a reading — rather than from a generic dark-SaaS template.
+
+   ⚠ THE FOURTH STATE IS THE IDENTITY. Most UI colour systems have three
+   verdicts: good, warning, bad. This one has four, and the fourth is UNKNOWN.
+   Everywhere a value is unreadable the UI must show --color-unknown as a
+   diagonal hatch or an em-dash — NEVER `0`, NEVER the last-known value.
+   A stale reading displayed as live is exactly the class of lie the source
+   codebase exists to prevent (PLAN.md §7).
+   ========================================================================== */
+
+@import 'tailwindcss';
+
+/* Self-hosted, no CDN — same rule as the vision runtime. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+/* Heading font, ported from the procminds.com launch page. Self-hosted via
+   npm rather than the Google Fonts CDN that page uses — see THEME.md for why
+   the CDN request was declined even though it was in the source page. */
+@import '@fontsource-variable/space-grotesk';
+
+@theme {
+  /* --- base surfaces -------------------------------------------------------
+     Harmonized 2026-08-06 with the procminds.com launch page (THEME.md).
+     These are neutrals — brightness/hue only, no semantic meaning — so
+     matching them to the brand site carries no risk to the verdict ramp
+     below. Values are the launch page's --brand-darker / --brand-dark,
+     with --surface-raised nudged to keep the same relative-brightness step
+     the previous ramp had (base < surface < surface-raised). */
+  --color-base: #03060d;
+  --color-surface: #050b18;
+  --color-surface-raised: #0d1526;
+
+  /* --- brand chrome --------------------------------------------------------
+     Decorative/navigational only — logo mark, links, CTAs, focus rings.
+     ⚠ NEVER use these to express a verdict. A future component reaching for
+     "a blue accent" for e.g. a violation state would silently reintroduce
+     the ambiguity the verdict ramp exists to prevent. If a color needs to
+     mean something about proctoring state, it belongs in the ramp below,
+     not here. */
+  --color-brand-cyan: #00d2ff;
+  --color-brand-blue: #0f64b4;
+
+  /* --- verdict ramp ------------------------------------------------------- */
+  /* verified / safe / eyes open and centred */
+  --color-verified: #10b981;
+  --color-verified-dim: #065f46;
+  /* violation — a reported, evidenced accusation.
+     ⚠ #EF4444 is the specified token value. Components must reference
+     `--color-violation` (or the Tailwind `*-violation` utilities it generates),
+     never a hex literal, so this stays the single place the ramp is defined. */
+  --color-violation: #ef4444;
+  --color-violation-dim: #7f1d1d;
+  /* glance / marginal — recorded, deliberately NOT escalated */
+  --color-glance: #f59e0b;
+  --color-glance-dim: #78350f;
+  /* ⚠ UNKNOWN — unreadable. Never rendered as a number. */
+  --color-unknown: #64748b;
+  --color-unknown-dim: #334155;
+  /* suppressed — what the safeguard blocked. Muted on purpose: it is
+     evidence the system worked, not evidence against the student. */
+  --color-suppressed: #7c3aed;
+
+  /* --- type --------------------------------------------------------------- */
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  /* Every telemetry readout is mono + tabular so live digits do not jitter. */
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  /* Ported from procminds.com for headings only — body copy and telemetry
+     stay on --font-sans / --font-mono above. */
+  --font-heading: 'Space Grotesk Variable', 'Inter Variable', ui-sans-serif, sans-serif;
+
+  --radius-card: 0.875rem;
+}
+
+/* The hatch that means "we could not read this". Used by the EAR gauge, the
+   eye boxes on EYE_CLOSED, and the timeline. It is a texture rather than a
+   colour so it can never be mistaken for a low-but-real value. */
+@utility hatch-unknown {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--color-unknown-dim) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+/* Tabular numerals for every live figure. */
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* Standard glass surface (PLAN.md §4).
+   ⚠ Tracks --color-surface via var() rather than repeating its hex. It used to
+   hardcode #0F1524 — the pre-harmonization surface value — which left every
+   glass panel lighter than the page after the brand surfaces went dark. */
+@utility glass {
+  background-color: color-mix(in oklab, var(--color-surface) 78%, transparent);
+  backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in oklab, #94a3b8 16%, transparent);
+}
+
+/* ==========================================================================
+   THE PAGE ITSELF.
+
+   ⚠ This block is the fix for "the site looks light and plain". Every surface
+   token above was already dark, and Nav/Footer already painted themselves with
+   them — but nothing ever set a background on <body>, so all of it floated on
+   the browser default WHITE. Dark components on a white page is what read as
+   "plain": the atmosphere was never missing, it was never applied.
+   ========================================================================== */
+@layer base {
+  body {
+    background-color: var(--color-base);
+    /* ⚠ NOT var(--color-unknown), despite it being the right grey. That token
+       means "we could not read this" in the instrument panel; spending it as
+       the default body text colour would make the page's own prose an instance
+       of the unreadable state, and would put a verdict token in a decorative
+       role (THEME.md §3). Plain slate-400 — chrome, meaning nothing. */
+    color: #94a3b8;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* ==========================================================================
+   AMBIENT CYBER ATMOSPHERE — ported from procminds.com (THEME.md §2).
+
+   ⚠ ALL OF THIS IS CHROME. Cyan gridlines, blurred orbs and glow shadows are
+   decoration and carry NO verdict meaning (THEME.md §3). None of it may be
+   used to say something about a student, and — the direction that actually
+   bites — none of it may be layered over a reading. Specifically: the
+   `hatch-unknown` texture above must never sit inside a glow, because a
+   glowing hatch reads as an active measurement rather than the absence of one.
+   ========================================================================== */
+
+/* 50px cyan gridlines. Identical geometry and alpha to the countdown page's
+   .bg-grid-pattern — the 0.05 alpha is load-bearing: brighter, and the grid
+   starts competing with real UI for attention. */
+@utility cyber-grid {
+  background-size: 50px 50px;
+  background-image:
+    linear-gradient(to right, rgba(0, 210, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 210, 255, 0.05) 1px, transparent 1px);
+}
+
+/* Blurred ambient light source. Always pointer-events:none — an orb is a
+   backdrop and must never intercept a click meant for the UI above it. */
+@utility orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-12px) scale(1.02);
+  }
+}
+
+@keyframes pulse-slow {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ==========================================================================
+   ⚠⚠ R3 — THE MIRROR. THIS IS THE ONLY `transform: scaleX(-1)` IN THE ENTIRE
+   CODEBASE, AND IT MUST STAY THAT WAY.
+
+   It is applied to ONE element — the wrapper in
+   `src/components/ProctorDemo/CameraStage.jsx` that is a common ancestor of
+   BOTH the <video> and the overlay <canvas>. Because both children are flipped
+   together by the same transform, the overlay draws in RAW, UNMIRRORED
+   VIDEO-PIXEL COORDINATES: exactly the space the ported geometry consumes.
+
+   Consequences that are load-bearing, not stylistic:
+
+   1. There is NO flip arithmetic anywhere in JS. Negating landmark x before the
+      math would invert the data-derived anchor in `orientedGazeRatio` and make
+      LEFT read as RIGHT — and no unit test catches it, because the math stays
+      perfectly self-consistent. PLAN.md §8's manual check is the only real one.
+   2. NO TEXT may be drawn on the overlay canvas; it would render mirrored.
+      Every label lives in an un-mirrored sibling layer outside this element.
+   3. `drawImage(video, …)` in `src/vision/snapshot.js` ignores CSS transforms,
+      so evidence snapshots are unmirrored and agree with the landmarks.
+
+   Adding a second `scaleX(-1)` anywhere — even "to fix" a misaligned overlay —
+   double-flips one layer and silently puts every box on the wrong eye.
+   ========================================================================== */
+.demo-mirror {
+  transform: scaleX(-1);
+}
+
+/* Conic border beam on hover — CSS @property + one animated gradient, no JS.
+   Purely decorative; disabled wholesale by the reduced-motion block below. */
+@property --beam-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.beam {
+  position: relative;
+  isolation: isolate;
+}
+
+.beam::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--beam-angle),
+    transparent 0deg,
+    color-mix(in oklab, var(--color-verified) 70%, transparent) 40deg,
+    transparent 110deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.beam:hover::before,
+.beam:focus-within::before {
+  opacity: 1;
+  animation: beam-spin 4s linear infinite;
+}
+
+@keyframes beam-spin {
+  to {
+    --beam-angle: 360deg;
+  }
+}
+
+/* Marquee auto-scroll — the track holds two copies of the items, and this
+   keyframe shifts the first copy entirely out of view so the second takes its
+   place seamlessly. */
+@keyframes marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.marquee-track {
+  animation: marquee-scroll 30s linear infinite;
+}
+
+/* PLAN.md §4: every animation respects prefers-reduced-motion. This is the
+   floor, not the whole story — components must not rely on it alone. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

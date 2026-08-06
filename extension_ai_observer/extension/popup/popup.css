@@ -1,0 +1,307 @@
+/* =============================================================================
+   AI Observer — Popup Stylesheet
+   Modern dark theme with glassmorphism styling.
+   ============================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg-color: #0d0d11;
+  --panel-bg: rgba(25, 25, 35, 0.75);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --primary-color: #6366f1;
+  --primary-glow: rgba(99, 102, 241, 0.35);
+  --error-color: #ef4444;
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --text-color: #f3f4f6;
+  --text-muted: #9ca3af;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  width: 360px;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  overflow-x: hidden;
+  padding: 16px;
+}
+
+/* --- Glass Card Container --- */
+
+.glass-card {
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* --- Header --- */
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.logo {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.ai-text {
+  background: linear-gradient(135deg, #a78bfa, #6366f1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.3s ease;
+}
+
+.badge.active {
+  background-color: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.2);
+  color: var(--success-color);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+}
+
+
+
+/* --- Views --- */
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
+}
+
+
+/* --- Typography --- */
+
+h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+}
+
+/* --- Input Groups --- */
+
+.input-group {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+input, select {
+  background-color: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text-color);
+  font-size: 12px;
+  outline: none;
+  transition: all 0.3s ease;
+}
+
+input:focus, select:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-glow);
+}
+
+
+/* --- Buttons --- */
+
+.primary-btn {
+  width: 100%;
+  background: linear-gradient(135deg, #818cf8, #6366f1);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 11px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.3s ease;
+}
+
+.primary-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--primary-glow);
+}
+
+.pulse-glow {
+  animation: pulse 2s infinite alternate;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 4px var(--primary-glow); }
+  100% { box-shadow: 0 0 16px var(--primary-glow); }
+}
+
+.secondary-btn {
+  width: 100%;
+  background-color: var(--error-color);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 11px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.3s ease;
+}
+
+.text-btn {
+  width: 100%;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.3s ease;
+}
+
+.text-btn:hover {
+  color: var(--text-color);
+  border-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+
+.hidden {
+  display: none !important;
+}
+
+.error-msg {
+  color: var(--error-color);
+  font-size: 11px;
+  margin-top: 8px;
+  text-align: center;
+  font-weight: 500;
+  display: none;
+}
+
+/* --- Student/Teacher Cards --- */
+
+.student-info {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.student-info .name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.student-info .id {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.divider {
+  border: 0;
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 12px 0;
+}
+
+/* --- Status Checklist --- */
+
+.status-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.checklist-item .chk-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--error-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 8px;
+  flex-shrink: 0;
+}
+
+.checklist-item.verified .chk-icon {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: var(--success-color);
+}
+
+/* --- Provider Badge --- */
+
+.provider-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background-color: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.1);
+  border-radius: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+
