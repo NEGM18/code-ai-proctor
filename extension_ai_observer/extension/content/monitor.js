@@ -2198,12 +2198,23 @@ function maybeRetierForMeasuredCost() {
   // so sampling it less often costs accuracy nowhere.
   classifierIntervalMs = Math.max(classifierIntervalMs, realistic * 4);
 
+  // ⚠ ONE LINE, ONCE PER SESSION — `retierApplied` above guarantees it, and the
+  // per-frame overrun warning is separately gated by `slowInferenceWarned`.
+  // Neither may become per-frame: at a 1340ms tick that is a console message
+  // roughly every second, which buries the one line that actually says what
+  // changed and costs measurable time in the very loop being diagnosed.
+  //
+  // Leads with the summary sentence, then the evidence. The provider is named
+  // because "CPU fallback" and "GPU that failed to bind" need different fixes.
+  const fps = (1000 / realistic).toFixed(1);
+  const provider = (runtimeProfile && runtimeProfile.degradedToWasm) ? 'CPU fallback mode' : 'CPU mode';
   console.warn(
-    `[AI Observer] Tier-${runtimeProfile ? runtimeProfile.tier : '?'} cadence of ${was}ms is not ` +
-    `achievable on this machine (measured ${lastInferenceMs.toFixed(0)}ms over ${RETIER_SAMPLES} ticks). ` +
-    `Adopting ${realistic}ms (~${(1000 / realistic).toFixed(1)} FPS) and backing the classifier off to ` +
-    `${Math.round(classifierIntervalMs)}ms, so the exam UI keeps some CPU. ` +
-    `To recover speed: re-export best.onnx at 224 (it is currently 640x640, which is the bulk of this cost).`
+    `[AI Observer] Performance Tier adjusted: ${provider} operating at ~${fps} FPS. `
+    + `(Tier-${runtimeProfile ? runtimeProfile.tier : '?'} target ${was}ms was unachievable — `
+    + `measured ${lastInferenceMs.toFixed(0)}ms over ${RETIER_SAMPLES} ticks; classifier backed off to `
+    + `${Math.round(classifierIntervalMs)}ms.) `
+    + `To recover speed: re-export best.onnx at 224 — it is a STATIC 640x640 graph, `
+    + `which is the bulk of this cost and cannot be downscaled at runtime.`
   );
 }
 
