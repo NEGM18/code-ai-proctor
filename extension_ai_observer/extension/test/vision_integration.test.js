@@ -35,6 +35,42 @@ const visionScripts = scripts.filter((s) => s.startsWith('content/vision/'));
 
 check('manifest registers all ten vision modules', visionScripts.length, 10);
 
+// --- MediaPipe WASM loader triple ------------------------------------------
+//
+// ⚠ THESE THREE ARE A UNIT AND THE ORDER IS THE MECHANISM, not a preference.
+//
+// `vision_wasm_internal.js` is a classic script whose UMD tail exports the WASM
+// factory. Loading it as a content script is what puts `globalThis.ModuleFactory`
+// in the ISOLATED world, where tasks-vision.js looks for it — MediaPipe's own
+// loader injects it into the PAGE world instead, which is why it threw
+// `ModuleFactory not set.` every time. eval() is not an alternative: MV3 blocks
+// it in content scripts.
+//
+// open   -> installs the CommonJS shim the UMD tail needs
+// loader -> exports the factory into that shim
+// close  -> moves it to globalThis and REMOVES the shim
+//
+// If anything is listed between open and close, it sees a global `module` and
+// takes its own CommonJS branch — `mediapipe_source.js` does exactly that and
+// would stop assigning `root.MediaPipeExtensionSource`.
+const MP_OPEN = 'content/mediapipe_wasm_open.js';
+const MP_LOADER = 'lib/mediapipe/wasm/vision_wasm_internal.js';
+const MP_CLOSE = 'content/mediapipe_wasm_close.js';
+
+check('manifest registers the MediaPipe wasm open shim', scripts.indexOf(MP_OPEN) !== -1, true);
+check('manifest registers the MediaPipe wasm loader', scripts.indexOf(MP_LOADER) !== -1, true);
+check('manifest registers the MediaPipe wasm close shim', scripts.indexOf(MP_CLOSE) !== -1, true);
+check('wasm loader is loaded AFTER the open shim',
+  scripts.indexOf(MP_OPEN) < scripts.indexOf(MP_LOADER), true);
+check('close shim is loaded AFTER the wasm loader',
+  scripts.indexOf(MP_LOADER) < scripts.indexOf(MP_CLOSE), true);
+check('the loader triple is contiguous — nothing may load inside the shim',
+  scripts.indexOf(MP_CLOSE) - scripts.indexOf(MP_OPEN), 2);
+check('ModuleFactory exists before mediapipe_source.js runs',
+  scripts.indexOf(MP_CLOSE) < scripts.indexOf('content/mediapipe_source.js'), true);
+check('ModuleFactory exists before vision_engine.js runs',
+  scripts.indexOf(MP_CLOSE) < scripts.indexOf('content/vision/vision_engine.js'), true);
+
 // Ordering contract: every module must appear after the ones it depends on.
 const orderOf = (f) => visionScripts.indexOf(f);
 

@@ -7,11 +7,25 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
-import { LIVE_STATUS, useExtensionBridge } from '../../hooks/useExtensionBridge.js';
+import { LIVE_STATUS, VISION_STATUS, useExtensionBridge } from '../../hooks/useExtensionBridge.js';
 import { navigate } from '../../lib/route.js';
 import EvidencePanel from './EvidencePanel.jsx';
 
 const EXAM_SECONDS = 5 * 60;
+
+/**
+ * Extension violation types that pause the exam behind the overlay.
+ *
+ * Deliberately only the two focus-loss types. A gaze or phone violation must NOT
+ * veil the paper: those fire while the candidate is sitting right there working,
+ * and covering the questions over one glance away would make the demo unusable —
+ * and, in a real exam, would be a proctoring tool obstructing the assessment it
+ * exists to observe.
+ */
+const PAUSE_VIOLATION_TYPES = new Set(['WINDOW_BLUR', 'VISIBILITY_HIDDEN']);
+
+/** Continuous compliant time required before the overlay lifts itself. */
+const RESUME_DELAY_MS = 2000;
 
 /** Where to acquire the extension. */
 const EDGE_ADDONS_URL = 'https://microsoftedge.microsoft.com/addons';
@@ -124,7 +138,23 @@ export default function DemoQuizPage() {
   // Both callbacks are stable (see the hook), so this now runs exactly once.
   const { startGuestQuiz, stopGuestQuiz } = bridge;
   useEffect(() => {
-    startGuestQuiz();
+    // Fullscreen is requested BEFORE the guest session starts, so the vision
+    // pipeline initialises against the viewport the exam will actually run in.
+    //
+    // ⚠ THIS CAN LEGITIMATELY FAIL, AND THAT IS NOT AN ERROR STATE.
+    // requestFullscreen() needs transient user activation, which does NOT
+    // survive the navigation into /demo-quiz — so on a cold entry it rejects.
+    // The rejection is caught and converted into the SAME soft warning any other
+    // route out of fullscreen raises, which carries a click that does have
+    // activation. Proctoring must start either way: refusing to start because
+    // the browser withheld fullscreen would mean a candidate who declines it is
+    // simply not monitored, which is worse than a windowed session.
+    const el = document.documentElement;
+    Promise.resolve()
+      .then(() => (el.requestFullscreen ? el.requestFullscreen() : Promise.reject()))
+      .catch(() => setFullscreenWarning(true))
+      .finally(() => { startGuestQuiz(); });
+
     return () => {
       stopGuestQuiz();
     };
@@ -205,6 +235,76 @@ export default function DemoQuizPage() {
     };
   }, []);
 
+  // ---- the EXTENSION's verdict also raises the overlay ----
+  //
+  // The DOM listeners above see only what this document sees. The extension sees
+  // more: it owns the focus-loss coalescer and reports WINDOW_BLUR /
+  // VISIBILITY_HIDDEN after its own debounce, on evidence this page does not have
+  // (screen-share frames, its own timers). Driving the same `focusLost` state
+  // from both keeps ONE overlay with one dismissal path — a second, independent
+  // "paused" flag would let the two disagree and strand the candidate behind a
+  // veil neither of them owns.
+  //
+  // Idempotent by construction: setting `true` when already `true` is a no-op, so
+  // an extension event arriving after the DOM event costs nothing.
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.source !== window) return;
+      const msg = event.data;
+      if (msg?.type !== 'SAFETEST_GUEST_VIOLATION') return;
+      if (PAUSE_VIOLATION_TYPES.has(msg.violationType)) setFocusLost(true);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // ---- automatic recovery ----
+  //
+  // Resume once the candidate is genuinely back: focused, visible AND in
+  // fullscreen, held continuously for RESUME_DELAY_MS.
+  //
+  // ⚠ THE DELAY IS RESTARTED BY ANY LAPSE, NOT PAUSED. `compliant` is re-evaluated
+  // on every relevant event, and one failing check clears the pending timer, so
+  // two 1.9 s visits cannot add up to a resume. Nothing auto-resumes while the
+  // candidate is still away.
+  //
+  // ⚠ THE MANUAL BUTTON STAYS. Fullscreen is a REQUIREMENT of this path, so a
+  // candidate who never entered it — or whose browser refuses it — would other-
+  // wise sit behind the overlay forever with no way out. Auto-recovery is the
+  // convenience; the click is the guarantee.
+  useEffect(() => {
+    if (!focusLost) return undefined;
+
+    let timer = null;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+    const evaluate = () => {
+      const compliant = document.hasFocus()
+        && !document.hidden
+        && !!document.fullscreenElement;
+
+      if (!compliant) { cancel(); return; }
+      if (timer) return;   // already counting down — do not restart on re-entry
+      timer = setTimeout(() => {
+        timer = null;
+        setFocusLost(false);
+      }, RESUME_DELAY_MS);
+    };
+
+    evaluate();
+    window.addEventListener('focus', evaluate);
+    window.addEventListener('blur', evaluate);
+    document.addEventListener('visibilitychange', evaluate);
+    document.addEventListener('fullscreenchange', evaluate);
+    return () => {
+      cancel();
+      window.removeEventListener('focus', evaluate);
+      window.removeEventListener('blur', evaluate);
+      document.removeEventListener('visibilitychange', evaluate);
+      document.removeEventListener('fullscreenchange', evaluate);
+    };
+  }, [focusLost]);
+
   // ---- countdown timer ----
   useEffect(() => {
     if (submitted) return undefined;
@@ -232,6 +332,9 @@ export default function DemoQuizPage() {
 
   // Recency-based, not count-based — see LIVE_STATUS_RECOVERY_MS in the hook.
   const liveActive = bridge.liveStatus === LIVE_STATUS.ACTIVE;
+  // Strict equality, never a falsy check: `null` means "still loading", and
+  // treating it as offline would flash the fault banner on every entry.
+  const visionOffline = bridge.visionStatus === VISION_STATUS.OFFLINE;
 
   const answeredCount = Object.keys(answers).length;
   const score = submitted ? QUESTIONS.filter((q) => answers[q.id] === q.answer).length : null;
@@ -349,11 +452,16 @@ export default function DemoQuizPage() {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-6 backdrop-blur-md">
           <div className="max-w-md rounded-card border border-amber-500/40 bg-surface-raised p-6 text-center shadow-2xl">
             <p className="text-3xl" aria-hidden="true">👁️</p>
-            <h2 className="mt-3 text-lg font-semibold text-amber-200">Focus lost</h2>
+            <h2 className="mt-3 text-lg font-semibold text-amber-200">
+              Exam Paused — Please return focus to the exam window
+            </h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
               You switched away from the exam. In a real assessment this is recorded
               as an incident, and the proctor sees a capture of your screen at that
               moment — not your face.
+            </p>
+            <p className="mt-2 text-xs text-slate-500">
+              This clears on its own once you are back in fullscreen, or resume now.
             </p>
             <button
               type="button"
@@ -510,6 +618,30 @@ export default function DemoQuizPage() {
                 tone={violations.length > 0 ? 'text-glance' : 'text-slate-400'}
               />
             </dl>
+
+            {/* ---- Vision pipeline health ----
+                ⚠ ONLY RENDERED ON AN EXPLICIT OFFLINE VERDICT. `visionStatus`
+                is null while the engine is still loading, and a fault banner
+                during normal startup teaches people to ignore the banner.
+                When it does appear it must be impossible to miss: a dead
+                pipeline previously looked identical to a clean session, because
+                "no violations reported" and "nothing is watching" render the
+                same way. */}
+            {visionOffline ? (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg border border-violation/50 bg-violation/10 p-3"
+              >
+                <p className="text-xs font-bold uppercase tracking-wide text-violation">
+                  Vision Pipeline Offline (CSP/WASM Error)
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                  Face and gaze detection are not running. Focus and fullscreen
+                  checks are unaffected.
+                  {bridge.visionReason ? ` (${bridge.visionReason})` : null}
+                </p>
+              </div>
+            ) : null}
           </section>
 
           {/* Real-time Evidence Panel holding snapshots & verdicts directly */}

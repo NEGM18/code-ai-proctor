@@ -37,6 +37,19 @@ export const LIVE_STATUS = Object.freeze({
   ACTIVE: 'ACTIVE',
 });
 
+/**
+ * Health of the extension's vision pipeline.
+ *
+ * ⚠ THREE STATES, NOT TWO. `null` (unknown / still loading) is deliberately
+ * distinct from OFFLINE. A dead pipeline previously presented as a calm session
+ * — the extension stayed connected and simply never reported anything — so
+ * "nothing is happening" has to be distinguishable from "nothing is watching".
+ */
+export const VISION_STATUS = Object.freeze({
+  ONLINE: 'ONLINE',
+  OFFLINE: 'OFFLINE',
+});
+
 export function useExtensionBridge() {
   const [extensionDetected, setExtensionDetected] = useState(null); // null = probing
   const [guestSessionId, setGuestSessionId] = useState(null);
@@ -67,6 +80,10 @@ export function useExtensionBridge() {
   // ever reflects the last few seconds.
   const [liveStatus, setLiveStatus] = useState(LIVE_STATUS.NORMAL);
   const recoveryTimerRef = useRef(null);
+
+  // null until the extension reports — see VISION_STATUS.
+  const [visionStatus, setVisionStatus] = useState(null);
+  const [visionReason, setVisionReason] = useState(null);
 
   const raiseLiveStatus = useCallback(() => {
     setLiveStatus(LIVE_STATUS.ACTIVE);
@@ -126,6 +143,16 @@ export function useExtensionBridge() {
       if (msg?.type === 'SAFETEST_EXTENSION_DISCONNECTED') {
         setExtensionDetected(false);
         setLiveStatus(LIVE_STATUS.NORMAL);
+        return;
+      }
+
+      // The vision pipeline reporting its own health. `null` means "no verdict
+      // yet" and must stay distinct from OFFLINE: before the engine finishes
+      // loading there is nothing wrong to announce, and showing a fault during
+      // startup would train people to ignore it.
+      if (msg?.type === 'SAFETEST_VISION_STATUS') {
+        setVisionStatus(msg.state === 'OFFLINE' ? VISION_STATUS.OFFLINE : VISION_STATUS.ONLINE);
+        setVisionReason(msg.reason || null);
         return;
       }
 
@@ -285,6 +312,8 @@ export function useExtensionBridge() {
     guestSessionId,
     extensionViolations,
     liveStatus,
+    visionStatus,
+    visionReason,
     startGuestQuiz,
     stopGuestQuiz,
   };

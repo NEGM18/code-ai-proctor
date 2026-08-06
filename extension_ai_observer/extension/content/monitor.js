@@ -790,6 +790,23 @@ async function reportViolation(violationType, options = {}) {
     // Context invalidated during extension reload
   }
 
+  // ⚠ A GUEST SESSION HAS NO BACKEND TO RETRY AGAINST — DO NOT QUEUE.
+  //
+  // The anonymous visitor is not signed in (and `ANONYMOUS_AUTH_FAILED` makes
+  // that permanent for the visit), so writeViolation() can only ever return
+  // NOT_SIGNED_IN / NO_SESSION. The old path took that as "offline", enqueued the
+  // payload and wrote the whole queue to chrome.storage — per violation, for a
+  // queue that can never drain. On a busy demo that is a storage write every few
+  // seconds, each one carrying base64 snapshots toward the quota, plus a console
+  // warning that reads like a fault when it is the expected state.
+  //
+  // The page already has the evidence by this point: the VIOLATION_EVENT posted
+  // above reaches the worker, which relays GUEST_VIOLATION_RELAY to
+  // guest_bridge.js, which posts SAFETEST_GUEST_VIOLATION to the React page. That
+  // is the ONLY delivery path a guest session has or needs, so the remote write
+  // is skipped outright rather than attempted and mourned.
+  if (guestSessionMode) return;
+
   const result = await writeViolation(payload, false);
   if (!result.ok) {
     console.warn('[AI Observer] Violation not recorded, queuing for retry:', result.reason);
@@ -848,6 +865,12 @@ function enqueueOffline(payload) {
 }
 
 async function flushOfflineQueue() {
+  // A guest session must make no server calls at all. reportViolation() no longer
+  // enqueues in guest mode, but a queue PERSISTED BY AN EARLIER SIGNED-IN SESSION
+  // is restored from chrome.storage on load — without this guard a visitor who
+  // opens the demo would replay someone else's backlog against an endpoint they
+  // have no token for, once per flush trigger, forever.
+  if (guestSessionMode) return;
   if (offlineQueue.length === 0) return;
 
   const queue = [...offlineQueue];
@@ -1944,9 +1967,35 @@ function getPhoneDetected() {
  * @param {string} url - Backend base URL.
  * @returns {Promise<boolean>} True if head-pose analysis is available.
  */
+/**
+ * Tell the page whether the vision pipeline is actually running.
+ *
+ * ⚠ A DEAD PIPELINE MUST NOT LOOK LIKE A QUIET ONE. When FaceLandmarker failed
+ * to build (the MV3 `unsafe-eval` rejection did exactly this on both delegates)
+ * the extension stayed "connected" and simply never reported anything — which
+ * reads on screen as a calm, compliant session rather than as no proctoring at
+ * all. The HUD needs to be able to say so.
+ *
+ * Posted straight to the page: monitor.js is a content script in this same
+ * window, so it needs no worker relay. `guest_bridge.js` is not involved.
+ *
+ * @param {'ONLINE'|'OFFLINE'} state
+ * @param {string} [reason] Short operator-facing cause.
+ */
+function postVisionStatus(state, reason) {
+  try {
+    window.postMessage({
+      type: 'SAFETEST_VISION_STATUS',
+      state,
+      reason: reason || null,
+    }, '*');
+  } catch (e) { /* page going away */ }
+}
+
 async function initVisionEngine(url) {
   if (typeof VisionEngine === 'undefined') {
     console.warn('[AI Observer] Vision engine scripts not loaded; head pose disabled.');
+    postVisionStatus('OFFLINE', 'vision scripts not loaded');
     return false;
   }
 
@@ -1987,6 +2036,15 @@ async function initVisionEngine(url) {
     if (guestSessionMode) {
       const delegate = visionEngine.mediaPipeSource && visionEngine.mediaPipeSource.delegate;
       const accelerated = delegate === 'GPU';
+
+      // No delegate means FaceLandmarker built on NEITHER GPU nor CPU, so there
+      // are no landmarks and nothing downstream can fire. Report it — see
+      // postVisionStatus for why silence here is the dangerous outcome.
+      if (!delegate) {
+        postVisionStatus('OFFLINE', 'FaceLandmarker unavailable (CSP/WASM)');
+      } else {
+        postVisionStatus('ONLINE', `delegate=${delegate}`);
+      }
       const targetMs = accelerated ? 66 : 100;   // ~15 FPS vs ~10 FPS
       if (proctorIntervalMs < targetMs) {
         proctorIntervalMs = targetMs;

@@ -20,6 +20,9 @@
       "js": [
         "lib/ort.min.js",
         "lib/tasks-vision.js",
+        "content/mediapipe_wasm_open.js",
+        "lib/mediapipe/wasm/vision_wasm_internal.js",
+        "content/mediapipe_wasm_close.js",
         "content/supabase_rest.js",
         "content/lms_detector.js",
         "content/secure_loader.js",
