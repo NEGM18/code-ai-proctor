@@ -76,10 +76,22 @@ const VISION_DEFAULTS = {
   enableClosureHint: true,
 
   // Coarse pre-filter used while decoding. Phones are then re-judged against
-  // the much stricter PHONE_SHAPE_DEFAULTS gate; this only exists to keep NMS
-  // off obvious garbage, and MUST stay at or below the phone floor or the
-  // strict gate would never see the candidates it is meant to judge.
-  detectScoreThreshold: 0.35,
+  // the PHONE_SHAPE_DEFAULTS gate; this only exists to keep NMS off obvious
+  // garbage, and MUST stay at or below the phone floor or the gate would never
+  // see the candidates it is meant to judge.
+  //
+  // ⚠ THIS IS COUPLED TO PHONE_SHAPE_DEFAULTS.minConfidence AND IS THE EASIEST
+  // WAY TO MAKE A SENSITIVITY CHANGE SILENTLY DO NOTHING. It was 0.35 while the
+  // phone floor was 0.60. When that floor dropped to 0.30 (2026-08-08), leaving
+  // this at 0.35 would have discarded every candidate in [0.30, 0.35) DURING
+  // DECODING — before the gate ever ran — so the lowered floor would have
+  // bought no extra recall whatsoever, and the faint edge-of-frame detections
+  // the change exists to catch are exactly the ones living in that band.
+  //
+  // 0.20 keeps a real margin below the 0.30 gate, so the gate (and its reject
+  // telemetry) can actually judge borderline candidates instead of never seeing
+  // them. Lower still would mostly add NMS cost over pure noise.
+  detectScoreThreshold: 0.20,
 
   // Overrides for the phone confidence + aspect-ratio gate. See
   // PHONE_SHAPE_DEFAULTS in detectors.js for what each field means and why the

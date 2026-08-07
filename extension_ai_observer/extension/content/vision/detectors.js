@@ -65,17 +65,65 @@
   //    a phone held at a steep angle foreshortens toward square — they are held
   //    to a much higher confidence bar instead.
   // -------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // ⚠ 2026-08-08 — THE OPERATING POINT WAS DELIBERATELY MOVED TOWARD RECALL.
+  //
+  // These floors used to be minConfidence 0.60 / squareConfidence 0.75, and both
+  // this file and CLAUDE.md said in terms: "Do not lower this. Lowering the
+  // confidence floor WITHOUT restoring a dwell requirement WILL produce false
+  // accusations." That warning has NOT been retracted and is NOT obsolete — it
+  // was OVERRIDDEN by an explicit product decision after live testing found the
+  // previous gate missing phones held at the frame edge or visible as only a
+  // small cluster of pixels.
+  //
+  // WHAT THAT MEANS IN PRACTICE, STATED PLAINLY: a notebook, a sticky-note
+  // block, a paperback or a framed picture clears 0.30 far more often than it
+  // cleared 0.60. PHONE_DETECTED is CRITICAL severity and latches on a SINGLE
+  // frame with no dwell, so a false hit is a CRITICAL accusation against a
+  // student built from one frame of desk clutter. That is the accepted cost of
+  // catching the 1-5 frame glance; it is not a side effect anyone overlooked.
+  //
+  // WHAT STILL DOES THE PRECISION WORK. The confidence floor is no longer the
+  // main filter — the SHAPE and AREA guards are, and they were left intact
+  // precisely because they cost nothing in recall for a real phone:
+  //   * maxAspectRatio 4.0 kills pens, cables and edge artifacts at ANY score.
+  //   * squareConfidence still holds near-square boxes to a much higher bar than
+  //     rectangular ones. Squares are the single largest source of background
+  //     false positives, so the RELATIVE discipline is preserved even though
+  //     both absolute numbers came down.
+  //   * the area guards still reject specks and frame-filling furniture.
+  //
+  // IF FALSE PHONE ALERTS APPEAR IN THE FIELD, THIS BLOCK IS THE FIRST THING TO
+  // LOOK AT, and raising minConfidence back toward 0.60 is the one-line revert.
+  // Watch the rejected-candidate telemetry from filterPhoneDetections: a room
+  // full of rectangles now produces accepts where it used to produce rejects.
+  // ---------------------------------------------------------------------------
   const PHONE_SHAPE_DEFAULTS = {
-    /** Minimum score for a well-proportioned (clearly rectangular) box. */
-    minConfidence: 0.60,
-    /** Minimum score for a near-square box. Deliberately punitive. */
-    squareConfidence: 0.75,
+    /**
+     * Minimum score for a well-proportioned (clearly rectangular) box.
+     * Lowered 0.60 -> 0.30 for edge-of-frame and small-cluster phones.
+     */
+    minConfidence: 0.30,
+    /**
+     * Minimum score for a near-square box. Still deliberately punitive: it must
+     * stay strictly ABOVE minConfidence, and phone_detection.test.js asserts
+     * that ordering rather than the literal number. A phone held at a steep
+     * angle foreshortens toward square, so squares are not discarded outright —
+     * they just have to be much more convincing than a clean rectangle.
+     */
+    squareConfidence: 0.50,
     /** Below this longer/shorter-edge ratio a box counts as "square-ish". */
     minAspectRatio: 1.25,
     /** Above this it is a sliver (pen, cable, edge artifact), never a phone. */
     maxAspectRatio: 4.0,
-    /** Reject specks: fraction of frame area below which a box is noise. */
-    minAreaFraction: 0.0006,
+    /**
+     * Reject specks: fraction of frame area below which a box is noise.
+     * Lowered 0.0006 -> 0.0002 so a phone showing as a small cluster of pixels
+     * at the frame edge can still latch. At 640x480 that is ~61 px^2 (about
+     * 8x8), which is near the limit of what the 448 detect input can resolve at
+     * all — below it a box carries no shape information left to judge.
+     */
+    minAreaFraction: 0.0002,
     /** Reject a box covering most of the frame — that is furniture, not a phone. */
     maxAreaFraction: 0.35,
   };

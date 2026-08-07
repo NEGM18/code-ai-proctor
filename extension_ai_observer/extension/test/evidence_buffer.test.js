@@ -224,7 +224,17 @@ console.log('\n=== cleanup — no retained frames after clear ===');
   const entry = b.peakSince(-Infinity);
   check('entries hold a string image, never an object', typeof entry.image, 'string');
   check('entry shape is flat and primitive',
-    Object.keys(entry).sort(), ['image', 'score', 'source', 't']);
+    Object.keys(entry).sort(), ['image', 'pCheating', 'score', 'source', 't']);
+
+  // `pCheating` is the RAW classifier probability, retained ALONGSIDE the
+  // ranking score rather than folded into it — peakCheatingSince() answers a
+  // strictly narrower question than peakSince(). It is a plain number (NaN on
+  // the many frames the time-sliced classifier did not run), never a boxed
+  // reading, so the no-retained-surfaces property asserted above still holds.
+  check('pCheating is a primitive number, not a boxed reading',
+    typeof entry.pCheating, 'number');
+  checkTrue('and is NaN when no classifier reading accompanied the frame',
+    Number.isNaN(entry.pCheating));
 }
 
 console.log('\n=== steady state: a still student costs nothing ===');

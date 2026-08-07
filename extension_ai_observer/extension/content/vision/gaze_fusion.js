@@ -76,6 +76,17 @@ const GAZE_FUSION_DEFAULTS = {
   severeExcursion: 1.6,
   severeAbsOffset: 0.15,
 
+  // ⚠ VERTICAL AXIS — a SECOND, INDEPENDENT route to "severe", added for the
+  // downward/phone case. A phone lying flat below the camera moves the iris
+  // DOWN and barely at all sideways, so the horizontal test above scores it at
+  // ~0 and the episode would never qualify for a boost no matter how blatant.
+  //
+  // ⚠ SIGN: pitchDev is the gaze baseline's pose-convention deviation, where
+  // NEGATIVE IS DOWN (gaze_landmarks.js:510 negates vRatio into it). The
+  // comparison below is therefore `<=`, not `>=`. Inverting it would boost
+  // students glancing UP and forgive the phone reader — see downward_gaze.js.
+  severeDownPitchDev: -0.28,
+
   // The gaze episode must itself have been sustained this long. Spec item 3.
   // The analyser's own glance tier fires at exactly this dwell, so a boost can
   // never precede the detector's own first finding.
@@ -126,6 +137,26 @@ function isSevereGaze(excursion, absOffset, options = {}) {
 }
 
 /**
+ * Is this a severe DOWNWARD gaze?
+ *
+ * Independent of isSevereGaze: the two describe different postures and either
+ * alone qualifies an episode for a boost. A phone flat on the desk produces
+ * near-zero horizontal offset, so requiring both would make the downward case
+ * unboostable — which is the miss this whole change exists to fix.
+ *
+ * ⚠ NEGATIVE IS DOWN. `<=`, never `>=`.
+ *
+ * @param {number} pitchDev - Deviation from own calibrated neutral; < 0 is down.
+ * @param {object} [options]
+ * @returns {boolean}
+ */
+function isSevereDownwardGaze(pitchDev, options = {}) {
+  const opt = { ...GAZE_FUSION_DEFAULTS, ...options };
+  if (!Number.isFinite(pitchDev)) return false;
+  return pitchDev <= opt.severeDownPitchDev;
+}
+
+/**
  * Decide whether an already-raised gaze event should be escalated.
  *
  * @param {object} input
@@ -153,7 +184,14 @@ function fuseGazeEvidence(input = {}, options = {}) {
     nowMs,
   } = input;
 
-  const severe = isSevereGaze(gazeExcursion, gazeAbsOffset, opt);
+  // EITHER axis qualifies. Horizontal = peeking at notes beside the screen;
+  // vertical = reading something below the camera. A phone flat on the desk
+  // scores ~0 horizontally, so an AND here would leave it permanently
+  // unboostable.
+  const severeSide = isSevereGaze(gazeExcursion, gazeAbsOffset, opt);
+  const severeDown = isSevereDownwardGaze(input.gazePitchDev, opt);
+  const severe = severeSide || severeDown;
+
   const classifierAgeMs = (Number.isFinite(nowMs) && Number.isFinite(classifierAtMs))
     ? nowMs - classifierAtMs
     : Infinity;
@@ -163,8 +201,13 @@ function fuseGazeEvidence(input = {}, options = {}) {
     classifier_age_ms: Number.isFinite(classifierAgeMs) ? Math.round(classifierAgeMs) : null,
     gaze_excursion: Number.isFinite(gazeExcursion) ? Number(gazeExcursion.toFixed(3)) : null,
     gaze_abs_offset: Number.isFinite(gazeAbsOffset) ? Number(gazeAbsOffset.toFixed(3)) : null,
+    gaze_pitch_dev: Number.isFinite(input.gazePitchDev)
+      ? Number(input.gazePitchDev.toFixed(3)) : null,
     gaze_dwell_ms: Number.isFinite(gazeDwellMs) ? Math.round(gazeDwellMs) : null,
     gaze_severe: severe,
+    // Which axis qualified. A reviewer must be able to tell "peeking sideways
+    // at notes" from "reading something below the camera".
+    gaze_severe_axis: severeDown ? (severeSide ? 'both' : 'down') : (severeSide ? 'side' : 'none'),
     band: [opt.uncertainMin, opt.uncertainMax],
   };
 
@@ -174,7 +217,11 @@ function fuseGazeEvidence(input = {}, options = {}) {
   // Ordered so the gaze conditions are evaluated before the classifier ones: the
   // gaze event is the thing being escalated, and reporting "the classifier was
   // stale" for an episode that was never severe would misdescribe the reason.
-  if (!Number.isFinite(gazeExcursion) || !Number.isFinite(gazeAbsOffset)) {
+  // NO_GAZE only when NEITHER axis is readable. The downward path supplies
+  // pitchDev alone, so requiring the horizontal pair here would reject it.
+  const sideReadable = Number.isFinite(gazeExcursion) && Number.isFinite(gazeAbsOffset);
+  const downReadable = Number.isFinite(input.gazePitchDev);
+  if (!sideReadable && !downReadable) {
     return no(FUSION_VERDICT.NO_GAZE);
   }
   if (!severe) return no(FUSION_VERDICT.GAZE_NOT_SEVERE);
@@ -251,6 +298,7 @@ class GazeClassifierFusion {
       classifierAtMs: this._atMs,
       gazeExcursion: gaze.excursion,
       gazeAbsOffset: gaze.absOffset,
+      gazePitchDev: gaze.pitchDev,
       gazeDwellMs: gaze.dwellMs,
       nowMs,
     }, this.opt);
@@ -282,6 +330,7 @@ const __gazeFusionExports = {
   GAZE_FUSION_DEFAULTS,
   FUSION_VERDICT,
   isSevereGaze,
+  isSevereDownwardGaze,
   fuseGazeEvidence,
   GazeClassifierFusion,
 };

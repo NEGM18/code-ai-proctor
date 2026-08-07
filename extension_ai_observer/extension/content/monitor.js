@@ -38,6 +38,7 @@ const ViolationType = {
   // Kept SEPARATE from GAZE_OFF_SCREEN so a reviewer can tell which instrument
   // produced the claim — they have very different reliability.
   SIDE_GAZE_PEEKING:    'SIDE_GAZE_PEEKING',
+  DOWNWARD_GAZE_LOOKAWAY: 'DOWNWARD_GAZE_LOOKAWAY',
   // The student's head did not move toward the corner target within the
   // response window, after 45 s+ of unnaturally static pose. Consistent with a
   // photograph or a looped/frozen video feed in front of the camera.
@@ -76,6 +77,10 @@ const VIOLATION_SEVERITY = {
   // MEDIUM ceiling, same as GAZE_OFF_SCREEN and for the same reason: the signal
   // resolves left/centre/right, not point-of-regard. Never CRITICAL.
   [ViolationType.SIDE_GAZE_PEEKING]:    Severity.MEDIUM,
+  // Sustained downward gaze — reading a phone or notes below the camera.
+  // MEDIUM like the rest of the gaze family; gaze_fusion may raise a single
+  // episode to HIGH when the classifier independently agrees, never CRITICAL.
+  [ViolationType.DOWNWARD_GAZE_LOOKAWAY]: Severity.MEDIUM,
   [ViolationType.HEAD_POSE_GLANCE]:     Severity.LOW,
   [ViolationType.LIVENESS_FAILED]:      Severity.CRITICAL,
   [ViolationType.CAMERA_FEED_SYNTHETIC]: Severity.CRITICAL,
@@ -393,6 +398,22 @@ const NO_FACE_GATE = {
 let evidenceBuffer = null;
 /** @type {GazeClassifierFusion|null} */
 let gazeFusion = null;
+/** @type {DownwardGazeDetector|null} */
+let downwardGaze = null;
+/**
+ * Identity of the last landmark sample seen, and when it was first seen. Used
+ * ONLY to age `analyzer.lastSample`, which the analyser never clears — see
+ * handleDownwardGaze. Not a cache: the value is always read fresh off the
+ * analyser, and these two only answer "how old is that reading".
+ */
+let _downSampleRef = null;
+let _downSampleAtMs = NaN;
+/**
+ * Raw p_cheating awaiting the next evidence capture. One-shot by design: the
+ * classifier runs every 3-6 s, and holding its value across the frames in
+ * between would score them all identically and destroy the peak ranking.
+ */
+let _pCheatingFresh = NaN;
 
 // ---------------------------------------------------------------------------
 // Vision engine — head pose (every frame) + phone detection (time-sliced).
@@ -581,6 +602,13 @@ function buildTelemetryPayload(violationType, options = {}) {
     student_name: studentName,
     ai_confidence: options.aiConfidence || null,
     snapshot_b64: options.snapshotB64 || null,
+    // Alias of snapshot_b64 under the name the evidence spec uses. Added
+    // rather than renamed: `snapshot_b64` is what backend/main.py and the
+    // teacher dashboard already read, and renaming it would silently blank
+    // every incident image in the UI. For a gated violation this frame is the
+    // episode's MAX(p_cheating) frame, not the frame at report time — see
+    // peakEvidenceFor().
+    evidence_snapshot: options.snapshotB64 || null,
     metadata: options.metadata || {},
     page_url: window.location.href,
     execution_provider: window.getExecutionProvider ? window.getExecutionProvider() : 'unknown',
@@ -702,17 +730,21 @@ function captureEvidenceFrame(poseResult, nowMs) {
       ? pixelGaze.smoothedExcursion
       : NaN);
 
+  // p_cheating from the classifier, but ONLY on the frame it was actually
+  // produced. It is time-sliced at 3-6 s, so carrying the value forward would
+  // give every frame in between an identical score and flatten exactly the
+  // ranking this buffer exists to provide. `_pCheatingFresh` is set by the
+  // classifier block and consumed once, here.
+  const pCheating = Number.isFinite(_pCheatingFresh) ? _pCheatingFresh : NaN;
+  _pCheatingFresh = NaN;
+
   const scored = evidenceScore({
     poseExcursion: poseResult.smoothedExcursion,
     gazeExcursion,
-    // Deliberately NOT the last classifier probability. It is time-sliced at
-    // 3-6 s, so carrying it forward would give every frame in between an
-    // identical score and flatten exactly the ranking this buffer exists to
-    // provide. The classifier contributes on its own frames, via bestEvidence.
-    classifierProb: NaN,
+    classifierProb: pCheating,
   });
 
-  evidenceBuffer.capture(nowMs, scored, () => captureWebcamSnapshot(0.8));
+  evidenceBuffer.capture(nowMs, { ...scored, pCheating }, () => captureWebcamSnapshot(0.8));
 }
 
 /**
@@ -736,13 +768,24 @@ function peakEvidenceFor(nowMs, dwellMs, quality = 0.8) {
   // it usually starts a frame or two earlier, and the smoother's own 1200 ms
   // window means the excursion was already climbing before it crossed.
   const since = Number.isFinite(dwellMs) ? nowMs - dwellMs - 1200 : -Infinity;
-  const peak = evidenceBuffer.peakSince(since);
+
+  // MAX(p_cheating) across the episode wins when the classifier actually ran
+  // inside the window. It is the raw model score the brief asks for, and it
+  // beats the geometry ranking because it is the same quantity a reviewer sees
+  // in `aiConfidence`. The classifier is time-sliced at 3-6 s, though, so most
+  // short episodes contain no scored frame at all — hence the fallback, and
+  // hence `basis` recording which one was used rather than leaving a reviewer
+  // to guess whether 0.91 came from a model or from head geometry.
+  const byCheating = evidenceBuffer.peakCheatingSince(since);
+  const peak = (byCheating && byCheating.image) ? byCheating : evidenceBuffer.peakSince(since);
   if (!peak || !peak.image) return live();
 
   return {
     image: peak.image,
     evidence: {
+      basis: byCheating ? 'p_cheating' : 'geometry',
       peak_score: Number(peak.score.toFixed(3)),
+      p_cheating: Number.isFinite(peak.pCheating) ? Number(peak.pCheating.toFixed(3)) : null,
       source: peak.source,
       age_ms: Math.round(nowMs - peak.t),
       buffered: evidenceBuffer.size,
@@ -1312,7 +1355,50 @@ function pollScreenTrackState() {
 // Fullscreen Management
 // ---------------------------------------------------------------------------
 
+/**
+ * The element currently presented fullscreen, under either spelling.
+ *
+ * `webkitFullscreenElement` is the legacy alias; current Chrome sets both, but
+ * a page that entered fullscreen through the prefixed API on an older embedded
+ * webview can have only the second one populated. Reading just the standard
+ * property there reports "not fullscreen" about a document that plainly is.
+ *
+ * @returns {Element|null}
+ */
+function currentFullscreenElement() {
+  return document.fullscreenElement
+    || document.webkitFullscreenElement
+    || document.msFullscreenElement
+    || null;
+}
+
+/**
+ * Enter fullscreen, unless the document already is.
+ *
+ * ⚠ THE EARLY RETURN IS THE WHOLE POINT — DO NOT "SIMPLIFY" IT AWAY.
+ *
+ * The live demo page opens itself fullscreen. The extension then called
+ * requestFullscreen() again on `document.documentElement`, and in that state the
+ * second request does not no-op: when a DIFFERENT element already holds the
+ * fullscreen lock the request re-targets it, and browsers have been observed
+ * dropping straight back to windowed instead. The student watched the demo
+ * fall out of fullscreen the instant proctoring started — and because
+ * handleFullscreenChange() reads that transition as the student leaving, it
+ * also manufactured a CRITICAL FULLSCREEN_EXIT out of the extension's own call.
+ *
+ * Being already fullscreen satisfies the requirement completely, so there is
+ * nothing to request. Checking is also strictly safer than requesting: a
+ * redundant request can only spend the transient activation and change state,
+ * never improve it.
+ */
 async function requestFullscreen() {
+  // Already fullscreen — by any spelling — so the goal is met. Returning here
+  // also preserves the caller's user activation for anything after it.
+  if (currentFullscreenElement()) {
+    console.log('[AI Observer] Already fullscreen — skipping redundant request.');
+    return;
+  }
+
   try {
     const el = document.documentElement;
     if (el.requestFullscreen) await el.requestFullscreen();
@@ -2009,6 +2095,12 @@ function resetAiDecisionState() {
   // of someone else.
   if (evidenceBuffer) evidenceBuffer.clear();
   if (gazeFusion) gazeFusion.reset();
+  if (downwardGaze) downwardGaze.reset();
+  _pCheatingFresh = NaN;
+  // A sample from before the reset must not be aged against the new session's
+  // clock — it would read as fresh and re-arm the very mix the guard prevents.
+  _downSampleRef = null;
+  _downSampleAtMs = NaN;
 }
 
 /**
@@ -2176,6 +2268,9 @@ async function initVisionEngine(url) {
     }
     if (typeof GazeClassifierFusion !== 'undefined') {
       gazeFusion = new GazeClassifierFusion();
+    }
+    if (typeof DownwardGazeDetector !== 'undefined') {
+      downwardGaze = new DownwardGazeDetector();
     }
 
     // ── Guest frame budget ────────────────────────────────────────────────
@@ -2498,6 +2593,7 @@ async function runProctorInference() {
         // an episode AI_CHEATING_POSE already owns.
         handleGazeEvents(poseResult.gaze);
         handleLandmarkGazeEvents(poseResult.landmarkGaze);
+        handleDownwardGaze(poseResult, now);
       }
     }
 
@@ -2542,6 +2638,11 @@ async function runProctorInference() {
         // gaze episode. At a 3-6 s classifier interval an untimed value would
         // routinely describe a different moment entirely.
         if (gazeFusion) gazeFusion.submitClassifier(cheatingProb, now);
+
+        // Hand the raw p_cheating to the NEXT evidence capture, which happens
+        // on the following frame. One-shot: see captureEvidenceFrame for why a
+        // held-forward value would flatten the peak ranking.
+        _pCheatingFresh = cheatingProb;
 
         if (isCheatingFrame && (!bestEvidence || cheatingProb > bestEvidence.prob)) {
           bestEvidence = { prob: cheatingProb, snapshot: captureWebcamSnapshot(0.8) };
@@ -2845,6 +2946,111 @@ function handleLandmarkGazeEvents(gazeResult) {
 }
 
 /**
+ * Drive the downward-gaze detector and report its outcome.
+ *
+ * ⚠ WHY THIS EXISTS AS A SEPARATE DETECTOR. Live testing found a student
+ * reading a phone flat on the desk went completely unflagged: the object
+ * detector saw a foreshortened, hand-occluded rectangle and correctly rejected
+ * it against the phone shape gate, the head barely left its calibrated band,
+ * and the classifier has no notion of gaze direction. The only thing that moved
+ * was the iris, dropping in the eye opening for as long as the screen was read.
+ *
+ * ⚠ TWO SIGN CONVENTIONS, AND THEY DISAGREE. `deviation.pitchDev` comes from
+ * gaze_landmarks.js:510, which negates vRatio into pose convention, so
+ * NEGATIVE IS DOWN here. `ear_veto.js`'s vOffset uses the opposite sign. Both
+ * quantities are passed through under their own names and never derived from
+ * one another — see downward_gaze.js.
+ *
+ * ⚠ THE KEYBOARD PERMIT IS CONSULTED, NOT BYPASSED. Looking down is what typing
+ * looks like, and ear_veto.js's KeyboardGlancePermit exists to forgive exactly
+ * that. Passing `permitGranted` in means a forgiven frame accumulates no dwell
+ * at all, so a typist is never accused; a reader is, because the permit expires
+ * mid-episode and its long-glance budget withdraws forgiveness outright.
+ *
+ * @param {object} poseResult - Vision engine frame result.
+ * @param {number} nowMs
+ */
+function handleDownwardGaze(poseResult, nowMs) {
+  if (!downwardGaze || !poseResult) return;
+
+  const lg = poseResult.landmarkGaze;
+  const analyzer = visionEngine ? visionEngine.landmarkGazeAnalyzer : null;
+  // The absolute iris height lives on the analyser's last sample; the per-frame
+  // result carries only the calibrated deviation. Both are required — see
+  // downward_gaze.js for why either alone is unfair or exploitable.
+  const sample = analyzer ? analyzer.lastSample : null;
+
+  // ⚠ AGE THE ABSOLUTE READING. `lastSample` is assigned only on a VALID sample
+  // and is never cleared on an unreadable frame, so it can outlive the frame
+  // that produced it and get mixed with a fresh pitchDev — see maxSampleAgeMs
+  // in downward_gaze.js for why that combination would be a false accusation.
+  //
+  // Freshness is detected by OBJECT IDENTITY, not by inspecting the values.
+  // analyzeGazeLandmarks() returns a new object per call and gaze_landmarks.js
+  // assigns it only in its valid branch, so "the reference changed" is a direct
+  // observation that a new reading was produced on this frame. That is strictly
+  // better than inferring freshness from `lg.deviation` being non-null:
+  // deviation is additionally gated on the baseline being calibrated, so during
+  // calibration it is null while lastSample updates perfectly well. Identity
+  // tracks the thing we actually care about, and stays correct if that coupling
+  // ever changes — which is the entire point of this guard.
+  if (sample && sample !== _downSampleRef) {
+    _downSampleRef = sample;
+    _downSampleAtMs = nowMs;
+  }
+  const sampleAgeMs = Number.isFinite(_downSampleAtMs) ? nowMs - _downSampleAtMs : Infinity;
+
+  const res = downwardGaze.process({
+    sampleAgeMs,
+    vRatio: sample && Number.isFinite(sample.vRatio) ? sample.vRatio : NaN,
+    pitchDev: lg && lg.deviation && Number.isFinite(lg.deviation.pitchDev)
+      ? lg.deviation.pitchDev : NaN,
+    ear: lg && Number.isFinite(lg.ear) ? lg.ear : NaN,
+    // gaze_landmarks already refuses to sample off-neutral, so an unreadable
+    // frame arrives as NaN above rather than as a false head-neutral claim.
+    headNeutral: !(lg && lg.status === 'head_off_neutral'),
+    permitGranted: !!(earVetoGate && earVetoGate.permit
+      && earVetoGate.permit.isGranted(nowMs)),
+  }, nowMs, !!(livenessManager && livenessManager.isChallengeActive()));
+
+  if (!res.events.length) return;
+
+  for (const ev of res.events) {
+    // Fusion may raise this one episode to HIGH when the classifier
+    // independently agrees on the same moment. It can never create the event —
+    // the dwell gate above already did, on iris geometry alone.
+    const fusion = gazeFusion
+      ? gazeFusion.evaluate({
+        excursion: lg ? lg.smoothedExcursion : NaN,
+        absOffset: NaN,                       // this is the vertical case
+        pitchDev: ev.detail.pitchDev,
+        dwellMs: ev.dwellMs,
+      }, nowMs)
+      : null;
+
+    const evidence = peakEvidenceFor(nowMs, ev.dwellMs);
+
+    reportViolation(ViolationType.DOWNWARD_GAZE_LOOKAWAY, {
+      aiConfidence: (fusion && fusion.boost) ? fusion.aggregate : ev.peak,
+      snapshotB64: evidence.image,
+      severityOverride: (fusion && fusion.boost) ? Severity.HIGH : undefined,
+      metadata: {
+        ...ev.detail,
+        dwell_ms: ev.dwellMs,
+        head_neutral: true,
+        // Recorded so a reviewer can see this fired WITHOUT a phone label —
+        // which is the entire point of the detector.
+        phone_label_present: PHONE_DETECTED,
+        keyboard_permit: (earVetoGate && earVetoGate.permit)
+          ? earVetoGate.permit.snapshot(nowMs) : null,
+        evidence: evidence.evidence,
+        fusion: fusion ? { verdict: fusion.verdict, ...fusion.detail } : null,
+      },
+    });
+  }
+}
+
+/**
  * Report object detections. Called once per PROCESSED frame.
  *
  * PHONES — latch and hold. Every detection reaching this point has already
@@ -2911,6 +3117,19 @@ function handleObjectDetections(detections, nowMs) {
           // rectangular phone from a borderline square that only passed
           // because it was very high confidence.
           shape: bestPhone && bestPhone.shape ? bestPhone.shape : null,
+          // ⚠ THE OPERATING POINT THAT ADMITTED THIS DETECTION.
+          //
+          // The phone floor was lowered to 0.30 with no dwell requirement (see
+          // PHONE_SHAPE_DEFAULTS), so this violation can now be raised from a
+          // single frame scoring barely above a third. PHONE_DETECTED is
+          // CRITICAL, and a teacher reviewing the incident must be able to tell
+          // a 0.31 detection from a 0.95 one — without this field both render
+          // identically as "phone detected", which is the difference between an
+          // auditable call and an unfalsifiable one.
+          confidence_floor: (typeof PHONE_SHAPE_DEFAULTS !== 'undefined')
+            ? PHONE_SHAPE_DEFAULTS.minConfidence : null,
+          square_confidence_floor: (typeof PHONE_SHAPE_DEFAULTS !== 'undefined')
+            ? PHONE_SHAPE_DEFAULTS.squareConfidence : null,
           hold_frames: (visionEngine.phoneLatch && visionEngine.phoneLatch.opt.holdFrames) || null,
           hold_ms: (visionEngine.phoneLatch && visionEngine.phoneLatch.opt.holdMs) || null,
           frame_index: phoneFrameIndex,
@@ -3492,3 +3711,7 @@ window.getEvidenceBufferState = () => (evidenceBuffer ? evidenceBuffer.telemetry
 // boosted; a high CLASSIFIER_STALE count means the classifier interval is too
 // long relative to gaze episodes for fusion to contribute anything.
 window.getGazeFusionState = () => (gazeFusion ? gazeFusion.telemetry() : null);
+// Downward gaze. `forgiven` climbing with `events` at zero is the keyboard
+// safeguard doing its job on a typist. `unreadable` climbing means no landmark
+// source is feeding it and the detector is inert.
+window.getDownwardGazeState = () => (downwardGaze ? downwardGaze.telemetry() : null);

@@ -18,7 +18,7 @@
     {
       "matches": ["https://*.pages.dev/*", "https://safetest.space/*", "https://procminds.com/*", "https://www.procminds.com/*", "http://localhost:*/*", "http://127.0.0.1:*/*"],
       "js": [
-        "lib/ort.min.js",
+        "lib/ort.webgpu.min.js",
         "lib/tasks-vision.js",
         "content/mediapipe_wasm_open.js",
         "lib/mediapipe/wasm/vision_wasm_internal.js",
@@ -36,6 +36,7 @@
         "content/vision/gaze_roi.js",
         "content/vision/gaze_landmarks.js",
         "content/vision/ear_veto.js",
+        "content/vision/downward_gaze.js",
         "content/vision/gaze_fusion.js",
         "content/vision/evidence_buffer.js",
         "content/vision/detectors.js",

@@ -6,9 +6,17 @@
 // The two requirements pull in opposite directions and both are asserted here:
 //
 //   PRECISION — a square notebook/sticky-note artifact must not raise an alert,
-//   and the confidence floor must stay high (>= 0.60).
-//   RECALL    — a phone visible for as little as ONE frame must latch, and the
-//   alert state must survive long after the phone is hidden.
+//   and a near-square box must clear a strictly higher bar than a rectangle.
+//   RECALL    — a phone visible for as little as ONE frame must latch, even
+//   when it is faint and small at the edge of frame, and the alert state must
+//   survive long after the phone is hidden.
+//
+// ⚠ THE BALANCE MOVED ON 2026-08-08. This suite used to assert a >= 0.60
+// confidence floor as the primary precision guarantee. That floor is now 0.30
+// with no dwell requirement, by explicit product decision, so precision rests
+// on the SHAPE and AREA guards plus the square/rectangle split. Those are what
+// this suite now pins; the confidence floor is pinned to its exact briefed
+// value so a drift in either direction is visible.
 //
 // If a future change makes one of these pass by breaking the other, this suite
 // is the thing that catches it.
@@ -37,19 +45,39 @@ function phone(score, w, h) {
 
 const FRAME = { width: 640, height: 480 };
 
-console.log('=== confidence floor is HIGH and stays high ===');
+console.log('=== confidence floor — the SENSITIVE operating point ===');
 {
-  // Locking the constant down in a test: lowering it is the single easiest way
-  // to reintroduce the background-rectangle false positives this gate exists
-  // to remove, and it should require deliberately editing an assertion.
-  checkTrue('minConfidence is at least 0.60', det.PHONE_SHAPE_DEFAULTS.minConfidence >= 0.60);
-  checkTrue('minConfidence is at most 0.70', det.PHONE_SHAPE_DEFAULTS.minConfidence <= 0.70);
-  checkTrue('square boxes need more than the base floor',
+  // ⚠ THIS BLOCK USED TO ASSERT `minConfidence >= 0.60` AND SAID SO IN ITS
+  // NAME. That was deliberately overridden on 2026-08-08 after live testing
+  // found the 0.60 gate missing phones held at the frame edge or resolving to
+  // only a small cluster of pixels. The assertion is not weakened by accident —
+  // it is re-pointed at the new operating point, and the tradeoff it used to
+  // protect against is now REAL and accepted. See PHONE_SHAPE_DEFAULTS.
+  check('minConfidence is the specified 0.30', det.PHONE_SHAPE_DEFAULTS.minConfidence, 0.30);
+  checkTrue('and stays within the briefed 0.25-0.30 band',
+    det.PHONE_SHAPE_DEFAULTS.minConfidence >= 0.25
+    && det.PHONE_SHAPE_DEFAULTS.minConfidence <= 0.30);
+
+  // ⚠ THE ORDERING IS THE SURVIVING PRECISION GUARANTEE. Both absolute numbers
+  // came down, but a near-square box must still clear a strictly higher bar
+  // than a clean rectangle — squares are the largest single source of
+  // background false positives, and collapsing these two into one value is how
+  // desk clutter starts reading as a phone.
+  checkTrue('square boxes still need more than the base floor',
     det.PHONE_SHAPE_DEFAULTS.squareConfidence > det.PHONE_SHAPE_DEFAULTS.minConfidence);
 
-  // A well-shaped 16:9 box just under the floor is still rejected.
-  check('0.55 rectangular rejected', det.evaluatePhoneShape(phone(0.55, 40, 71), FRAME).accept, false);
-  check('0.62 rectangular accepted', det.evaluatePhoneShape(phone(0.62, 40, 71), FRAME).accept, true);
+  // A well-shaped 16:9 box just under the floor is still rejected...
+  check('0.25 rectangular rejected', det.evaluatePhoneShape(phone(0.25, 40, 71), FRAME).accept, false);
+  // ...and one just over it now latches, where 0.60 would have discarded it.
+  check('0.31 rectangular accepted', det.evaluatePhoneShape(phone(0.31, 40, 71), FRAME).accept, true);
+  check('0.62 rectangular still accepted', det.evaluatePhoneShape(phone(0.62, 40, 71), FRAME).accept, true);
+
+  // ⚠ THE MISS THIS CHANGE EXISTS TO FIX: a phone at the edge of frame, faint
+  // and small. Under the old 0.60 floor AND the old 0.0006 area guard this was
+  // rejected twice over; it is exactly the detection the brief asks to catch.
+  const edgePhone = det.evaluatePhoneShape(phone(0.33, 9, 16), FRAME);
+  check('a faint, small edge-of-frame phone is accepted', edgePhone.accept, true);
+  check('and is judged against the rectangular bar', edgePhone.requiredConfidence, 0.30);
 }
 
 console.log('\n=== aspect ratio shape guard ===');
@@ -59,15 +87,19 @@ console.log('\n=== aspect ratio shape guard ===');
   check('perfect square is 1', det.boxAspectRatio({ x1: 0, y1: 0, x2: 50, y2: 50 }), 1);
   check('degenerate box is 0', det.boxAspectRatio({ x1: 10, y1: 10, x2: 10, y2: 50 }), 0);
 
-  // The headline case: a 1:1 sticky note / wall-art artifact scoring well above
-  // the base floor must NOT alert.
-  const square = det.evaluatePhoneShape(phone(0.66, 50, 50), FRAME);
-  check('1:1 square at 0.66 rejected', square.accept, false);
+  // The headline case: a 1:1 sticky note / wall-art artifact must NOT alert
+  // just because it cleared the (now much lower) rectangular floor. Scored at
+  // 0.42 it is comfortably above minConfidence 0.30 and still rejected — which
+  // is the entire reason the two bars remain separate values.
+  const square = det.evaluatePhoneShape(phone(0.42, 50, 50), FRAME);
+  check('1:1 square at 0.42 rejected despite clearing the rectangular floor',
+    square.accept, false);
   check('square rejection reason', square.reason, 'square_below_high_confidence');
   check('square is held to the higher bar', square.requiredConfidence, det.PHONE_SHAPE_DEFAULTS.squareConfidence);
 
   // Not discarded outright: a phone angled steeply foreshortens toward square,
-  // so a very confident square still gets through.
+  // so a confident square still gets through.
+  check('1:1 square at 0.55 accepted', det.evaluatePhoneShape(phone(0.55, 50, 50), FRAME).accept, true);
   check('1:1 square at 0.80 accepted', det.evaluatePhoneShape(phone(0.80, 50, 50), FRAME).accept, true);
 
   // Real phone aspect ratios all clear the shape test at the base floor.
@@ -96,10 +128,14 @@ console.log('\n=== area guards ===');
 
 console.log('\n=== filterPhoneDetections ===');
 {
+  // Scores re-pointed at the 0.30 / 0.50 operating point: the square sits above
+  // the rectangular floor but below the square one, and the "low confidence"
+  // case sits below BOTH. Under the old 0.60/0.75 bars these were 0.65 and
+  // 0.40; the roles they play in this test are unchanged.
   const mixed = [
     phone(0.82, 40, 71),                                             // real phone
-    phone(0.65, 50, 50),                                             // square artifact
-    phone(0.40, 40, 71),                                             // low confidence
+    phone(0.42, 50, 50),                                             // square artifact
+    phone(0.22, 40, 71),                                             // low confidence
     { score: 0.91, classId: det.COCO_LAPTOP, box: { x1: 0, y1: 0, x2: 200, y2: 140 } },
   ];
   const { phones, rejected } = det.filterPhoneDetections(mixed, FRAME);

@@ -77,6 +77,12 @@ import { eyeAspectRatio, LANDMARK_CONTRACT, analyzeGazeLandmarks } from './gaze_
     'GAZE_OFF_SCREEN',
     // Landmark gaze — already EAR-gated internally; this is the backstop.
     'SIDE_GAZE_PEEKING',
+    // Sustained downward gaze (reading a phone or notes below the camera).
+    // The claim this entry makes is straightforwardly true: you cannot read a
+    // phone screen with your eyes shut. downward_gaze.js also refuses to emit
+    // without a live vRatio, which a closed eye never produces — this is the
+    // backstop for that, not a replacement for it.
+    'DOWNWARD_GAZE_LOOKAWAY',
     // ⚠ The whole-frame cheating/normal classifier (best.onnx) raising an alert
     // on its own. This entry is the ONLY reason that promotion is safe: the
     // model learned "eyes shut" as a correlate of cheating, and the veto is

@@ -155,7 +155,7 @@
       "file": "ear_veto.js",
       "group": "umd",
       "upstream": "extension/content/vision/ear_veto.js",
-      "upstreamTotalLines": 743,
+      "upstreamTotalLines": 749,
       "bodyRanges": [
         [
           1,
@@ -163,7 +163,7 @@
         ],
         [
           66,
-          729
+          735
         ]
       ],
       "removedFromUpstream": [
@@ -176,7 +176,7 @@
           743
         ]
       ],
-      "sha256": "bd3a781a63ba6c318974f2bad54a6726a242c97a3a59441463a6eb3f20978651",
+      "sha256": "316b41f3cafee29ead93d4d81f2c43cc784be33aed1588ca54b28ed6bcd00568",
       "exports": [
         "VETOABLE_VIOLATIONS",
         "NEVER_VETOABLE",

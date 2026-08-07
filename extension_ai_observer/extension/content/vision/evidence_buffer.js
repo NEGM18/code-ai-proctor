@@ -186,7 +186,16 @@ class EvidenceRingBuffer {
     }
 
     this._lastCaptureMs = nowMs;
-    const entry = { t: nowMs, score, source, image };
+    // `pCheating` is the RAW classifier probability for this frame, kept
+    // alongside the ranking score rather than folded into it. They answer
+    // different questions — the score ranks every frame including the many with
+    // no classifier reading at all, while p_cheating is NaN except on the
+    // frames best.onnx actually ran. Merging them would make "the peak
+    // p_cheating frame" unanswerable.
+    const pCheating = (typeof scored === 'object' && scored !== null
+      && Number.isFinite(scored.pCheating)) ? scored.pCheating : NaN;
+
+    const entry = { t: nowMs, score, source, pCheating, image };
     this._items.push(entry);
 
     while (this._items.length > this.opt.maxFrames) {
@@ -217,6 +226,31 @@ class EvidenceRingBuffer {
     for (const e of this._items) {
       if (e.t < floor) continue;
       if (!best || e.score > best.score) best = e;
+    }
+    return best;
+  }
+
+  /**
+   * Highest RAW p_cheating frame at or after `sinceMs`, or null when no frame
+   * in the window carried a classifier reading at all.
+   *
+   * Separate from peakSince() on purpose. The classifier is time-sliced, so an
+   * episode of 2-3 s may contain zero, one or two scored frames — asking for
+   * "MAX(p_cheating)" is a strictly narrower question than "the best evidence
+   * frame", and a caller must be able to tell "the peak was 0.91" from "no
+   * classifier reading existed and this is the geometry peak instead".
+   * Returning null rather than silently falling back is what preserves that.
+   *
+   * @param {number} sinceMs
+   * @returns {object|null}
+   */
+  peakCheatingSince(sinceMs) {
+    const floor = Number.isFinite(sinceMs) ? sinceMs : -Infinity;
+    let best = null;
+    for (const e of this._items) {
+      if (e.t < floor) continue;
+      if (!Number.isFinite(e.pCheating)) continue;
+      if (!best || e.pCheating > best.pCheating) best = e;
     }
     return best;
   }

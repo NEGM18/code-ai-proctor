@@ -148,28 +148,63 @@ Three things that are easy to get wrong here:
 
 Two requirements pull in opposite directions; they are satisfied by different mechanisms.
 
-**Precision** — kill background rectangles, via `PHONE_SHAPE_DEFAULTS`:
-- `minConfidence: 0.60` for a clearly rectangular box. **Do not lower this.** A notebook,
-  sticky-note block or framed picture clears 0.35 routinely and rarely clears 0.60.
-- `squareConfidence: 0.75` for a box with aspect ratio `< 1.25`. Squares are not discarded
+> ⚠ **2026-08-08 — THE OPERATING POINT MOVED TOWARD RECALL.** This section previously
+> said `minConfidence: 0.60` and **"Do not lower this."** That instruction was
+> **overridden by an explicit product decision** after live testing found the 0.60 gate
+> missing phones held at the frame edge or resolving to a small cluster of pixels. The
+> reasoning behind the old warning was never refuted — it is now an **accepted cost**.
+> Do not "restore" 0.60 as a bug fix; see the tradeoff at the end of this section.
+
+**Sensitivity** — catch the edge-of-frame glimpse, via `PHONE_SHAPE_DEFAULTS`:
+- `minConfidence: 0.30` for a clearly rectangular box. A notebook, sticky-note block or
+  framed picture clears 0.30 **far more often** than it cleared 0.60. This is the knob that
+  trades precision for recall, and it is the one-line revert if the field disagrees.
+- `squareConfidence: 0.50` for a box with aspect ratio `< 1.25`. Squares are not discarded
   outright (a steeply angled phone foreshortens toward square) but must be much more
-  convincing. Real phones are 1.33 / 1.78 / 2.17.
+  convincing. Real phones are 1.33 / 1.78 / 2.17. **⚠ This must stay strictly ABOVE
+  `minConfidence`** — squares are the single largest source of background false positives,
+  and collapsing the two into one value is how desk clutter starts reading as a phone.
+  `phone_detection.test.js` asserts the *ordering*, not the literal number.
 - `maxAspectRatio: 4.0` — slivers (pens, cables, edge artifacts) are rejected at any score.
-- Area guards: `0.0006 … 0.35` of frame area.
+- Area guards: `0.0002 … 0.35` of frame area. The floor is ~61 px² at 640×480 (about 8×8),
+  near the limit of what a 448 detect input resolves at all; below it a box has no shape
+  information left to judge.
 
-**Recall** — never miss a 1–5 frame glimpse:
-- The detector runs **continuously**, on every processed frame. It used to run on a ~0.5 FPS
-  jittered slice; a 250 ms glimpse falls straight through a 1.75 s sampling gap.
-- `DetectionLatch` latches on the **first** qualifying frame — no dwell, no vote — then holds
-  `PHONE_DETECTED = true` until **both** ≥45 frames and ≥1500 ms have elapsed since the last
-  hit. Both floors matter: 45 frames is 2.2 s at 20 FPS but 5 s at 9 FPS, and a stalled machine
-  could otherwise satisfy 1500 ms in three frames.
-- The evidence snapshot is captured **on the hit frame**. Capturing later photographs an empty
-  desk, which is exactly what a student hiding the phone is counting on.
+**⚠ `detectScoreThreshold: 0.20` IS COUPLED TO THE FLOOR ABOVE** (`vision_engine.js`).
+It is the *decoder's* pre-filter and **must stay at or below `minConfidence`**, or the gate
+never sees the candidates it exists to judge. This is the easiest way to make a sensitivity
+change silently do nothing: it was `0.35` while the phone floor was `0.60`, and leaving it
+there after the drop to `0.30` would have discarded every candidate in `[0.30, 0.35)` during
+decoding — buying **zero** extra recall, while the faint edge-of-frame detections the change
+targets live in exactly that band. Change one, check the other.
 
-**The explicit tradeoff:** phone precision now rests entirely on the confidence + shape gate,
-not on temporal persistence. Lowering `minConfidence` without restoring a dwell requirement
-*will* produce false accusations.
+**Recall — instant latch-and-hold, ZERO dwell:**
+- The detector runs **continuously**, on **every processed frame**, alongside the MediaPipe
+  face landmarker. It used to run on a ~0.5 FPS jittered slice; a 250 ms glimpse falls
+  straight through a 1.75 s sampling gap.
+- `DetectionLatch` latches on the **first qualifying frame — no dwell, no vote, no
+  multi-frame confirmation.** One frame clearing the confidence + shape + area gate sets
+  `PHONE_DETECTED = true` and reports `PHONE_DETECTED` (CRITICAL) immediately.
+- The latch then **holds** until **both** ≥45 frames and ≥1500 ms have elapsed since the last
+  hit, so hiding the phone instantly cannot clear the incident. Both floors matter: 45 frames
+  is 2.2 s at 20 FPS but 5 s at 9 FPS, and a stalled machine could otherwise satisfy 1500 ms
+  in three frames. Further hits refresh the hold rather than re-latching, so continuous phone
+  use is one episode, not one per frame.
+- The evidence snapshot (`lastPhoneEvidence`) is captured **on the hit frame**. Capturing
+  later photographs an empty desk, which is exactly what a student hiding the phone is
+  counting on.
+
+**The explicit tradeoff — read this before tuning anything above.** Phone precision rests
+entirely on the confidence + **shape/area** gate, not on temporal persistence. With a 0.30
+floor **and** no dwell, `PHONE_DETECTED` can fire at **CRITICAL from a single frame of desk
+clutter**. That is the accepted price of catching the 1–5 frame glance — not an oversight.
+What still does the precision work is `maxAspectRatio`, the square/rectangle split and the
+area guards; those cost nothing in recall for a real phone. The incident payload therefore
+carries `confidence_floor` and `square_confidence_floor` beside `max_score`, so a reviewer
+can tell a 0.31 detection from a 0.95 one — without that they render identically as "phone
+detected". **If false phone alerts appear in the field, raise `minConfidence` (and
+`detectScoreThreshold` with it); watch the rejected-candidate telemetry from
+`filterPhoneDetections`, which now returns accepts where it used to return rejects.**
 
 Laptops/TVs (`SECONDARY_DEVICE`) keep the 4 s `DwellGate` — they are standing objects, and one
 frame of a monitor edge means nothing. They are also **off by default** (`detectClassFilter`);
@@ -680,7 +715,33 @@ runs, gates, and reaches telemetry; only the accusation is withheld. `NO_FACE` a
   two concurrent `predictFrame()` calls corrupt each other's input.
 - **Export imgsz must match what the extension feeds.** A mismatch silently destroys accuracy
   rather than erroring.
-- **Nothing alerts on a single frame** — except a gated phone, deliberately (see above).
+- **Nothing alerts on a single frame** — except a gated phone, deliberately (see §4). Phone
+  detection is an **instant latch-and-hold with ZERO dwell**: the first frame clearing the
+  confidence + shape + area gate reports `PHONE_DETECTED` (CRITICAL) immediately, captures
+  evidence on that same frame, and holds the latch for ≥45 frames **and** ≥1500 ms. Adding a
+  dwell requirement here would reinstate the miss the latch exists to fix — a 1–5 frame
+  glimpse cannot survive a persistence gate by construction.
+- **The phone floor and the decoder floor move together.**
+  `PHONE_SHAPE_DEFAULTS.minConfidence` (0.30) and `VISION_DEFAULTS.detectScoreThreshold`
+  (0.20) are coupled: the decoder pre-filter must stay **at or below** the phone floor, or
+  candidates are discarded before the gate can judge them and a sensitivity change becomes a
+  silent no-op. `squareConfidence` (0.50) must stay strictly **above** `minConfidence` —
+  that ordering, not the absolute numbers, is what keeps square desk clutter out, and it is
+  pinned by `phone_detection.test.js`. The 0.60 floor and its "do not lower this" note were
+  deliberately overridden on 2026-08-08; the accepted cost is written out in §4.
+- **`requestFullscreen()` must no-op when the document is already fullscreen.** It checks
+  `fullscreenElement` / `webkitFullscreenElement` / `msFullscreenElement` and returns early.
+  A redundant request can re-target the fullscreen lock and drop the page back to windowed —
+  which `handleFullscreenChange()` then reads as the student leaving, manufacturing a
+  CRITICAL `FULLSCREEN_EXIT` out of the extension's own call.
+- **The MediaPipe loader triple is a unit.** `lib/mediapipe/wasm/vision_wasm_internal.js`
+  must sit **strictly between** `content/mediapipe_wasm_open.js` and
+  `content/mediapipe_wasm_close.js` in `manifest.json`, with nothing between them — anything
+  listed inside the shim sees a global `module` and takes its own CommonJS branch. Every
+  MediaPipe and ORT runtime asset must stay covered by `web_accessible_resources`; they are
+  fetched at runtime from a `chrome-extension://` URL and an undeclared one fails as a
+  generic delegate error that never mentions the manifest. Both are pinned by
+  `vision_integration.test.js`.
 
 ---
 
