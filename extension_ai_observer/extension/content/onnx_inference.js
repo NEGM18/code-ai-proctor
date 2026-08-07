@@ -17,16 +17,23 @@ let classNames = ['cheating', 'normal']; // Default mapping: 0=cheating, 1=norma
 let activeExecutionProvider = 'unknown';
 
 // Input resolution the model was TRAINED and EXPORTED at. This MUST match the
-// ONNX input shape produced by export_onnx.py. The YOLO11n-cls proctor weights
-// were trained at 640; running inference at 224 collapses accuracy to ~chance.
+// ONNX input shape produced by export_onnx.py, which is STATIC — feeding a
+// different size does not merely degrade accuracy, it throws at run() on every
+// tick.
 //
-// 640 is ~8x the compute of the standard 224 classify input ((640/224)^2) for a
-// face-scale binary decision, which is the single biggest cost on low-end
-// hardware. The fix is to RETRAIN at 224 (train_cheating_yolo.py --imgsz 224)
-// and re-export — not to lower this constant on its own. Once the model is
-// re-exported, this adapts automatically: resolveModelInputSize() reads the real
-// input shape off the session and only falls back to this default.
-const DEFAULT_MODEL_INPUT_SIZE = 640;
+// 2026-08-07: the classifier was retrained and re-exported at 224 (92.6% top-1),
+// so weights/best.onnx and backend/static/models/best.onnx are both
+// [1,3,224,224] now. That is ~8x cheaper than the old 640 export ((640/224)^2)
+// for what is a face-scale binary decision, and 640 was the single biggest cost
+// on low-end hardware.
+//
+// ⚠ This default is LOAD-BEARING, not a safety net. resolveModelInputSize()
+// reads the real shape off the session, but ORT Web 1.19 (extension/lib/
+// ort.min.js) does not expose `session.inputMetadata` at all — the symbol is
+// absent from the bundle — so the probe ALWAYS falls through to this constant
+// today. It only becomes self-configuring on ORT >= 1.21. Until then,
+// re-exporting at a new size REQUIRES editing this line in the same change.
+const DEFAULT_MODEL_INPUT_SIZE = 224;
 let modelInputSize = DEFAULT_MODEL_INPUT_SIZE;
 
 // Preprocessing mode. MUST match what the weights were validated with.
