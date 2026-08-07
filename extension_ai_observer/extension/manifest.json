@@ -36,6 +36,8 @@
         "content/vision/gaze_roi.js",
         "content/vision/gaze_landmarks.js",
         "content/vision/ear_veto.js",
+        "content/vision/gaze_fusion.js",
+        "content/vision/evidence_buffer.js",
         "content/vision/detectors.js",
         "content/vision/vision_engine.js",
         "content/lighting_checker.js",

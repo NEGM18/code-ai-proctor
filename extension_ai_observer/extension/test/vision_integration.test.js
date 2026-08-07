@@ -33,7 +33,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'),
 const scripts = manifest.content_scripts[0].js;
 const visionScripts = scripts.filter((s) => s.startsWith('content/vision/'));
 
-check('manifest registers all ten vision modules', visionScripts.length, 10);
+check('manifest registers all twelve vision modules', visionScripts.length, 12);
 
 // --- MediaPipe WASM loader triple ------------------------------------------
 //
@@ -146,6 +146,25 @@ checkTrue('gaze_landmarks precedes ear_veto',
 checkTrue('ear_veto precedes monitor',
   scripts.indexOf('content/vision/ear_veto.js') < scripts.indexOf('content/monitor.js'));
 
+// --- gaze_fusion / evidence_buffer -----------------------------------------
+//
+// Both are consumed ONLY by monitor.js, so the single hard requirement is that
+// they precede it. gaze_fusion is additionally placed after gaze_landmarks
+// because it escalates that module's events and its thresholds are stated in
+// that module's units (excursion from calibrated neutral, hRatio offset) — a
+// reader who meets the fusion first has no way to interpret them.
+checkTrue('gaze_fusion is registered',
+  orderOf('content/vision/gaze_fusion.js') !== -1);
+checkTrue('gaze_landmarks precedes gaze_fusion',
+  orderOf('content/vision/gaze_landmarks.js') < orderOf('content/vision/gaze_fusion.js'));
+checkTrue('gaze_fusion precedes monitor',
+  scripts.indexOf('content/vision/gaze_fusion.js') < scripts.indexOf('content/monitor.js'));
+
+checkTrue('evidence_buffer is registered',
+  orderOf('content/vision/evidence_buffer.js') !== -1);
+checkTrue('evidence_buffer precedes monitor',
+  scripts.indexOf('content/vision/evidence_buffer.js') < scripts.indexOf('content/monitor.js'));
+
 // Every vision module on disk must actually be registered.
 const onDisk = fs.readdirSync(path.join(EXT_DIR, 'content', 'vision'))
   .filter((f) => f.endsWith('.js'))
@@ -184,6 +203,8 @@ for (const name of [
   'PoseBaseline', 'median',
   'TemporalSmoother', 'DwellGate', 'GateState',
   'HeadPoseAnalyzer', 'PoseCondition', 'PipelineStatus',
+  'EvidenceRingBuffer', 'evidenceScore', 'EVIDENCE_SOURCE',
+  'GazeClassifierFusion', 'fuseGazeEvidence', 'FUSION_VERDICT', 'isSevereGaze',
   'letterbox', 'rgbaToNCHW', 'decodePoseOutput', 'decodeDetectOutput',
   'TimeSlicedScheduler', 'COCO_CELL_PHONE', 'COCO_LAPTOP', 'COCO_TV',
   'VisionEngine',

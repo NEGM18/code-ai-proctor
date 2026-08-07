@@ -33,6 +33,39 @@ const DEFAULT_COOLDOWN_MS = 4000;
 const DEFAULT_INTERVAL_MS = 66;   // ~15 fps
 const DEFAULT_MIN_GAP_MS = 33;
 
+/**
+ * Head-analyser defaults for the demo.
+ *
+ * ⚠ THESE MUST TRACK `NO_FACE_GATE` IN extension/content/monitor.js. The demo
+ * and the extension are two front-ends over the SAME frozen pipeline, and a
+ * student who tries the demo and then sits a real exam must not meet two
+ * different definitions of "you left the frame". Before this existed the demo
+ * silently used pose_pipeline.js's own default (alertMs 5000, graceMs 800)
+ * while the extension used 2000/0.
+ *
+ * Why not import the constant: pose_pipeline.js is a byte-identical port under
+ * UPSTREAM.json and monitor.js is a content script with no module surface, so
+ * there is nothing importable to share. `no_face_buffer.test.js` pins the
+ * extension side by reading monitor.js's source, and the demo side is pinned
+ * below in __tests__/demo_engine.test.js — the pair is what keeps them honest.
+ *
+ *   alertMs 2000  the specified threshold.
+ *   graceMs 0     a face reappearing before 2 s resets the timer immediately.
+ *                 Any grace holds the episode open across the reappearance and
+ *                 keeps accumulating dwell, which is the opposite behaviour.
+ *   glanceMs      equal to alertMs, so DwellGate — which tests alertMs FIRST —
+ *                 makes the LOW tier unreachable and 2 s yields exactly one
+ *                 HIGH event, the only severity this engine reports for NO_FACE.
+ */
+export const DEFAULT_HEAD_OPTS = Object.freeze({
+  absenceGate: Object.freeze({
+    glanceMs: 2000,
+    alertMs: 2000,
+    graceMs: 0,
+    minRealertMs: 20000,
+  }),
+});
+
 export class ProctorDemoEngine {
   constructor(opts = {}) {
     if (!opts.landmarkSource) {
@@ -52,7 +85,10 @@ export class ProctorDemoEngine {
     this.minGapMs = opts.minGapMs ?? DEFAULT_MIN_GAP_MS;
     this.cooldownMs = opts.cooldownMs ?? DEFAULT_COOLDOWN_MS;
 
-    this.head = opts.headAnalyzer ?? new HeadPoseAnalyzer(opts.headOpts);
+    // Spread, not replace: a caller passing headOpts (the tests do) must still
+    // get the aligned absence gate unless they override that key specifically.
+    this.head = opts.headAnalyzer
+      ?? new HeadPoseAnalyzer({ ...DEFAULT_HEAD_OPTS, ...opts.headOpts });
     this.gaze = opts.gazeAnalyzer ?? new GazeLandmarkAnalyzer(opts.gazeOpts);
     this.veto = opts.vetoGate ?? new EarVetoGate(opts.vetoOpts);
 

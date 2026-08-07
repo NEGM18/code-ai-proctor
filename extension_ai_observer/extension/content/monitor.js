@@ -336,6 +336,65 @@ let lastAiFlagAt = 0;
 let bestEvidence = null;
 
 // ---------------------------------------------------------------------------
+// NO_FACE dwell — "continuously absent for 2.0 s".
+//
+// Absence is measured by the SAME per-frame predicate the pipeline already
+// uses: `!faceReadable` in pose_pipeline.js, i.e. the frame produced no usable
+// face geometry. With MediaPipe as the keypoint source (the normal path now),
+// persons are projected from FaceMesh output, so "no readable face" IS "FaceMesh
+// found no face" — the quantity the brief asks about, not a proxy for it.
+//
+// ⚠ CONFIGURATION, NOT NEW CODE, AND DELIBERATELY SO. pose_pipeline.js and
+// temporal_gate.js are frozen (CLAUDE.md §5) and DwellGate already implements
+// exactly this state machine, with the continuity protections a hand-rolled
+// timer would have to re-earn: maxSampleGapMs stops two samples 6 s apart
+// claiming 6 s of continuous absence, and the episode is anchored to the first
+// absent frame rather than to a counter that a variable frame rate would skew.
+// Re-implementing it in monitor.js would fork the semantics.
+//
+// Three deliberate values:
+//
+//   alertMs 2000   The brief's threshold. DwellGate tests alertMs BEFORE
+//                  glanceMs, so with glanceMs at the same value the LOW glance
+//                  tier is unreachable and 2.0 s produces exactly ONE HIGH
+//                  event — which is what handlePoseEvents reports. Previously
+//                  alertMs was 5000, so a student out of frame was not reported
+//                  for five seconds.
+//
+//   graceMs 0      The brief: "if a face reappears before the 2.0-second
+//                  threshold breaches, reset the timer to 0 immediately". The
+//                  default 800 ms grace does the opposite — it holds the episode
+//                  open across a brief reappearance so the dwell keeps
+//                  accumulating. Zero makes one readable frame end the episode,
+//                  which is both what was asked and the direction that favours
+//                  the student.
+//
+//   minRealertMs   Kept at 20 s. Without it a student who steps away for two
+//                  minutes generates an alert every 2 s, which buries the
+//                  incident log rather than informing it.
+// ---------------------------------------------------------------------------
+const NO_FACE_GATE = {
+  glanceMs: 2000,
+  alertMs: 2000,
+  graceMs: 0,
+  minRealertMs: 20000,
+};
+
+// ---------------------------------------------------------------------------
+// Evidence ring buffer — the frame a violation is ILLUSTRATED with.
+//
+// Every gated detector reports 2.5-3 s after the behaviour started, so a live
+// snapshot at report time routinely shows a student who has already returned to
+// neutral. This holds ~4 s of scored frames so the alert can carry the frame
+// that actually earned it. See evidence_buffer.js for why entries are strings
+// and why encoding is lazy.
+// ---------------------------------------------------------------------------
+/** @type {EvidenceRingBuffer|null} */
+let evidenceBuffer = null;
+/** @type {GazeClassifierFusion|null} */
+let gazeFusion = null;
+
+// ---------------------------------------------------------------------------
 // Vision engine — head pose (every frame) + phone detection (time-sliced).
 //
 // The binary classifier is NO LONGER a primary trigger. It is a whole-frame
@@ -612,6 +671,83 @@ function captureWebcamSnapshot(quality = 0.7) {
     console.error('[AI Observer] Webcam snapshot failed:', err);
     return null;
   }
+}
+
+/**
+ * Offer the current frame to the evidence ring buffer.
+ *
+ * Called once per processed pose frame, BEFORE any handler can report. The
+ * buffer applies its own throttle and score floor, so most calls cost two
+ * comparisons and never touch the canvas — the JPEG encode is behind a thunk
+ * and only runs for admitted frames.
+ *
+ * ⚠ The score ranks frames INSIDE an episode. It is not a detection threshold
+ * and nothing may be reported or suppressed because of it; every decision about
+ * whether a violation occurred stays with the detectors and their dwell gates.
+ *
+ * @param {object|null} poseResult - HeadPoseAnalyzer output for this frame.
+ * @param {number} nowMs
+ */
+function captureEvidenceFrame(poseResult, nowMs) {
+  if (!evidenceBuffer || !poseResult || typeof evidenceScore !== 'function') return;
+
+  // Gaze excursion from whichever analyser produced one this frame. Landmark
+  // gaze is preferred: it measures ratios of landmark distances, where the pixel
+  // path measures darkness and failed field testing on lighting and skin tone.
+  const landmarkGaze = poseResult.landmarkGaze;
+  const pixelGaze = poseResult.gaze;
+  const gazeExcursion = (landmarkGaze && Number.isFinite(landmarkGaze.smoothedExcursion))
+    ? landmarkGaze.smoothedExcursion
+    : ((pixelGaze && Number.isFinite(pixelGaze.smoothedExcursion))
+      ? pixelGaze.smoothedExcursion
+      : NaN);
+
+  const scored = evidenceScore({
+    poseExcursion: poseResult.smoothedExcursion,
+    gazeExcursion,
+    // Deliberately NOT the last classifier probability. It is time-sliced at
+    // 3-6 s, so carrying it forward would give every frame in between an
+    // identical score and flatten exactly the ranking this buffer exists to
+    // provide. The classifier contributes on its own frames, via bestEvidence.
+    classifierProb: NaN,
+  });
+
+  evidenceBuffer.capture(nowMs, scored, () => captureWebcamSnapshot(0.8));
+}
+
+/**
+ * Best available evidence image for an episode that began `dwellMs` ago.
+ *
+ * Falls back to a live snapshot whenever the buffer holds nothing for the
+ * window — a missing history must degrade to the previous behaviour, never to
+ * an alert with no image at all.
+ *
+ * @param {number} nowMs
+ * @param {number} dwellMs - Reported dwell of the episode.
+ * @param {number} [quality=0.8]
+ * @returns {{image: string|null, evidence: object|null}}
+ */
+function peakEvidenceFor(nowMs, dwellMs, quality = 0.8) {
+  const live = () => ({ image: captureWebcamSnapshot(quality), evidence: null });
+  if (!evidenceBuffer) return live();
+
+  // Reach back over the whole episode plus a margin. The margin matters: dwell
+  // is measured from the first DEVIANT sample, while the behaviour that produced
+  // it usually starts a frame or two earlier, and the smoother's own 1200 ms
+  // window means the excursion was already climbing before it crossed.
+  const since = Number.isFinite(dwellMs) ? nowMs - dwellMs - 1200 : -Infinity;
+  const peak = evidenceBuffer.peakSince(since);
+  if (!peak || !peak.image) return live();
+
+  return {
+    image: peak.image,
+    evidence: {
+      peak_score: Number(peak.score.toFixed(3)),
+      source: peak.source,
+      age_ms: Math.round(nowMs - peak.t),
+      buffered: evidenceBuffer.size,
+    },
+  };
 }
 
 /**
@@ -1867,6 +2003,12 @@ function resetAiDecisionState() {
   if (deviceGate) deviceGate.reset();
   if (livenessManager) livenessManager.reset();
   if (earVetoGate) earVetoGate.reset();
+  // Drops every retained data URL. Not merely hygiene: without it, evidence
+  // frames from a previous session remain eligible for peakSince() and could be
+  // attached to a new session's alert — a student illustrated with a photograph
+  // of someone else.
+  if (evidenceBuffer) evidenceBuffer.clear();
+  if (gazeFusion) gazeFusion.reset();
 }
 
 /**
@@ -2004,7 +2146,10 @@ async function initVisionEngine(url) {
     // degraded path — it is the correct one: pose.onnx/detect.onnx live on the
     // operator's backend, while MediaPipe ships inside the extension and gives
     // head pose, landmarks, gaze and blink immunity with no network at all.
-    visionEngine = new VisionEngine(guestSessionMode ? { offlineOnly: true } : {});
+    visionEngine = new VisionEngine({
+      ...(guestSessionMode ? { offlineOnly: true } : {}),
+      analyzer: { absenceGate: NO_FACE_GATE },
+    });
     const { pose, detect, poseSource } = await visionEngine.load(url);
 
     // The engine resolved (or reused) the hardware probe during load; adopt its
@@ -2019,6 +2164,18 @@ async function initVisionEngine(url) {
         glanceMs: 0, alertMs: 4000, graceMs: 2600,
         maxSampleGapMs: 8000, minRealertMs: 30000,
       });
+    }
+
+    // Evidence history and gaze/classifier fusion. Both guarded on their globals
+    // for the same reason deviceGate is: a stale unpacked build missing one
+    // script must degrade to "that feature is off", never to a load failure that
+    // takes proctoring down with it. Every call site below null-checks and falls
+    // back to the previous live-snapshot behaviour.
+    if (typeof EvidenceRingBuffer !== 'undefined') {
+      evidenceBuffer = new EvidenceRingBuffer();
+    }
+    if (typeof GazeClassifierFusion !== 'undefined') {
+      gazeFusion = new GazeClassifierFusion();
     }
 
     // ── Guest frame budget ────────────────────────────────────────────────
@@ -2325,6 +2482,16 @@ async function runProctorInference() {
             poseResult.eyeClosure ? poseResult.eyeClosure.closed : null, now);
         }
 
+        // ⚠ CAPTURE BEFORE THE HANDLERS REPORT.
+        //
+        // The handlers call reportViolation, which reads the buffer to pick its
+        // peak frame. Capturing afterwards would leave the frame that triggered
+        // the alert missing from the very lookup the alert performs — worst on
+        // the alert frame itself, which is often the strongest evidence in the
+        // episode. This one line's ordering is the whole difference between
+        // "peak of the episode" and "peak of the episode minus its climax".
+        captureEvidenceFrame(poseResult, now);
+
         handlePoseEvents(poseResult);
         // Gaze rides on the same keypoints and the same frame. It self-
         // suppresses when the head is off neutral, so it never double-reports
@@ -2370,6 +2537,11 @@ async function runProctorInference() {
 
         cheatFrameWindow.push({ prob: cheatingProb, cheating: isCheatingFrame });
         if (cheatFrameWindow.length > AI_WINDOW_FRAMES) cheatFrameWindow.shift();
+
+        // Timestamped, so the fusion can refuse a reading that pre-dates the
+        // gaze episode. At a 3-6 s classifier interval an untimed value would
+        // routinely describe a different moment entirely.
+        if (gazeFusion) gazeFusion.submitClassifier(cheatingProb, now);
 
         if (isCheatingFrame && (!bestEvidence || cheatingProb > bestEvidence.prob)) {
           bestEvidence = { prob: cheatingProb, snapshot: captureWebcamSnapshot(0.8) };
@@ -2490,9 +2662,15 @@ function handlePoseEvents(result) {
         continue;
       }
 
+      // Peak frame of the episode, not the live one. The dwell gate fires
+      // 2.5 s after onset, by which point a student who glanced at notes is
+      // usually facing forward again — the live snapshot then contradicts the
+      // alert it is supposed to evidence.
+      const evidence = peakEvidenceFor(performance.now(), ev.dwellMs);
+
       reportViolation(ViolationType.AI_CHEATING_POSE, {
         aiConfidence: ev.peak,
-        snapshotB64: captureWebcamSnapshot(0.8),
+        snapshotB64: evidence.image,
         // Escalate only when the independent classifier agrees.
         severityOverride: corroborated ? Severity.CRITICAL : undefined,
         metadata: {
@@ -2500,6 +2678,7 @@ function handlePoseEvents(result) {
           dwell_ms: ev.dwellMs,
           detector: 'head_pose_geometry',
           classifier_corroborated: corroborated,
+          evidence: evidence.evidence,
           vision: visionEngine ? visionEngine.telemetry() : null,
           liveness: livenessManager ? livenessManager.telemetry() : null,
         },
@@ -2565,14 +2744,23 @@ function handleGazeEvents(gazeResult) {
     // classifier: this signal is coarse (left/centre/right, not point-of-
     // regard), and the classifier has no notion of eye direction either, so
     // pairing them would stack two weak signals into a strong-looking claim.
+    //
+    // ⚠ The fusion in handleLandmarkGazeEvents does NOT extend here. That path
+    // measures ratios of landmark distances; this one measures pixel darkness
+    // and was withdrawn over lighting and skin-tone variance. Boosting a signal
+    // whose errors are unevenly distributed across students is a fairness
+    // problem, not just an accuracy one.
+    const gazeEvidence = peakEvidenceFor(performance.now(), ev.dwellMs);
+
     reportViolation(ViolationType.GAZE_OFF_SCREEN, {
       aiConfidence: ev.peak,
-      snapshotB64: captureWebcamSnapshot(0.8),
+      snapshotB64: gazeEvidence.image,
       metadata: {
         ...ev.detail,
         dwell_ms: ev.dwellMs,
         detector: 'gaze_roi',
         head_neutral: true,
+        evidence: gazeEvidence.evidence,
       },
     });
   }
@@ -2613,18 +2801,44 @@ function handleLandmarkGazeEvents(gazeResult) {
       continue;
     }
 
-    // Sustained (>= alertMs). Capped at MEDIUM and deliberately NOT escalated
-    // by the classifier, for the same reason gaze_roi is not: `best.onnx` has
-    // no notion of eye direction, so pairing the two manufactures a
-    // strong-looking claim out of two weak ones.
+    // Sustained (>= alertMs). MEDIUM by default.
+    //
+    // ⚠ THE ONE CASE THAT ESCALATES, AND WHY IT IS NOT THE THING THIS COMMENT
+    // USED TO FORBID. The rule was "never escalated by the classifier", because
+    // best.onnx has no notion of eye direction and pairing two weak signals
+    // manufactures a strong-looking claim. That still holds for MANUFACTURING a
+    // claim — and fusion cannot do that here. The event has already been raised
+    // by GazeLandmarkAnalyzer on its own evidence, through its own calibration,
+    // absolute band, head-neutrality test and dwell gate. Fusion only answers
+    // "does an independent instrument agree about this same moment?", and can
+    // move MEDIUM to HIGH. It can never turn silence into an accusation, it
+    // cannot reach CRITICAL, and because the type is unchanged the event stays
+    // on ear_veto.js's allowlist, so a blink still suppresses it. See
+    // gaze_fusion.js for the four bounds.
+    const nowFusion = performance.now();
+    const fusion = gazeFusion
+      ? gazeFusion.evaluate({
+        excursion: ev.detail ? ev.detail.excursion : NaN,
+        absOffset: (ev.detail && Number.isFinite(ev.detail.hRatio))
+          ? ev.detail.hRatio - 0.5
+          : NaN,
+        dwellMs: ev.dwellMs,
+      }, nowFusion)
+      : null;
+
+    const landmarkEvidence = peakEvidenceFor(nowFusion, ev.dwellMs);
+
     reportViolation(ViolationType.SIDE_GAZE_PEEKING, {
-      aiConfidence: ev.peak,
-      snapshotB64: captureWebcamSnapshot(0.8),
+      aiConfidence: (fusion && fusion.boost) ? fusion.aggregate : ev.peak,
+      snapshotB64: landmarkEvidence.image,
+      severityOverride: (fusion && fusion.boost) ? Severity.HIGH : undefined,
       metadata: {
         ...ev.detail,
         dwell_ms: ev.dwellMs,
         detector: 'gaze_landmarks',
         head_neutral: true,
+        evidence: landmarkEvidence.evidence,
+        fusion: fusion ? { verdict: fusion.verdict, ...fusion.detail } : null,
       },
     });
   }
@@ -3270,3 +3484,11 @@ window.getLandmarkGazeState = () => (
 // Coarse eye-closure channel feeding the EAR veto. `closed:null` every frame
 // means the fallback is not reading and the veto is running on nothing.
 window.getEyeClosureState = () => (visionEngine ? visionEngine.lastEyeClosure : null);
+// Evidence ring buffer. `size: 0` with a rising `below_floor` means the student
+// is simply sitting still — expected. A rising `encode_failures` means snapshots
+// are failing and alerts are silently falling back to live capture.
+window.getEvidenceBufferState = () => (evidenceBuffer ? evidenceBuffer.telemetry() : null);
+// Gaze/classifier fusion. `verdicts` shows WHY each gaze alert was or was not
+// boosted; a high CLASSIFIER_STALE count means the classifier interval is too
+// long relative to gaze episodes for fusion to contribute anything.
+window.getGazeFusionState = () => (gazeFusion ? gazeFusion.telemetry() : null);

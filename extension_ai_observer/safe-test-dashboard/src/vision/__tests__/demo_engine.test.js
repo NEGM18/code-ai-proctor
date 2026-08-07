@@ -24,7 +24,7 @@
 // =============================================================================
 
 import { describe, it, expect } from 'vitest';
-import { ProctorDemoEngine, VIOLATION } from '../demo_engine.js';
+import { ProctorDemoEngine, VIOLATION, DEFAULT_HEAD_OPTS } from '../demo_engine.js';
 // ⚠ PLAN.md §6: adapters live in `src/vision/adapters/`, not the vision root.
 import { ScriptedLandmarkSource } from '../adapters/landmark_source.js';
 import { VETO_REASON, NEVER_VETOABLE } from '../ear_veto.js';
@@ -525,5 +525,94 @@ describe('an isolated side gaze on a still head', () => {
   // show the MEDIUM case.
   it('sustained peeking produces one LOW event, not an escalating stream', () => {
     expect(run.violations).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// NO_FACE dwell — the demo must agree with the extension
+//
+// The demo and the extension are two front-ends over the SAME frozen pipeline.
+// A student who tries the demo and then sits a real exam must not meet two
+// different definitions of "you left the frame". The demo previously inherited
+// pose_pipeline.js's own default (alertMs 5000, graceMs 800) while the
+// extension configured 2000/0, so the two silently disagreed by three seconds.
+// ===========================================================================
+describe('NO_FACE dwell alignment with the extension', () => {
+  it('uses the 2.0 s threshold', () => {
+    expect(DEFAULT_HEAD_OPTS.absenceGate.alertMs).toBe(2000);
+  });
+
+  // ⚠ graceMs MUST be 0. Any grace holds the episode open across a brief
+  // reappearance and keeps accumulating dwell — the opposite of "a face
+  // reappearing before 2 s resets the timer immediately".
+  it('resets immediately when a face reappears', () => {
+    expect(DEFAULT_HEAD_OPTS.absenceGate.graceMs).toBe(0);
+  });
+
+  // DwellGate tests alertMs BEFORE glanceMs, so an equal glanceMs makes the LOW
+  // tier unreachable and 2 s yields exactly one HIGH event — the only severity
+  // this engine reports for NO_FACE.
+  it('does not emit a glance tier before the alert', () => {
+    expect(DEFAULT_HEAD_OPTS.absenceGate.glanceMs)
+      .toBeGreaterThanOrEqual(DEFAULT_HEAD_OPTS.absenceGate.alertMs);
+  });
+
+  // ⚠ THE ACTUAL ANTI-DRIFT CHECK. The constants above only prove the demo is
+  // internally consistent; this proves it still matches the extension. Skipped
+  // rather than failed when the extension tree is absent, exactly as
+  // scripts/check-vision-sync.mjs does — a dashboard-only checkout is a
+  // supported configuration, not a broken one.
+  it('matches NO_FACE_GATE in extension/content/monitor.js', async () => {
+    const { readFileSync, existsSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const path = await import('node:path');
+
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const monitorPath = path.resolve(
+      here, '..', '..', '..', '..', 'extension', 'content', 'monitor.js');
+
+    if (!existsSync(monitorPath)) {
+      expect(true).toBe(true); // dashboard-only checkout — nothing to compare
+      return;
+    }
+
+    const src = readFileSync(monitorPath, 'utf8');
+    const block = src.match(/const NO_FACE_GATE = \{([\s\S]*?)\};/);
+    expect(block, 'NO_FACE_GATE not found in monitor.js').toBeTruthy();
+
+    const numberFor = (key) => {
+      const m = block[1].match(new RegExp(`${key}:\\s*(\\d+)`));
+      return m ? Number(m[1]) : null;
+    };
+
+    for (const key of ['glanceMs', 'alertMs', 'graceMs', 'minRealertMs']) {
+      expect(numberFor(key), `NO_FACE_GATE.${key} drifted from the demo`)
+        .toBe(DEFAULT_HEAD_OPTS.absenceGate[key]);
+    }
+  });
+
+  // Behaviour, not just configuration: drive the real analyser through the real
+  // engine and confirm when the incident actually lands.
+  it('raises NO_FACE_DETECTED after 2 s with no face, and not before', () => {
+    const violations = [];
+    const engine = new ProctorDemoEngine({
+      // An empty face list is "MediaPipe found no face this frame" — the exact
+      // condition the extension measures, since persons are projected from
+      // FaceMesh output on both sides.
+      landmarkSource: {
+        detect: () => ({ faces: [], w: 640, h: 480 }),
+        close: () => {},
+      },
+      now: () => 0,
+      captureSnapshot: () => 'snap',
+      cooldownMs: 0,
+    });
+    engine.on('violation', (v) => violations.push(v));
+
+    for (let t = 0; t < 1900; t += 100) engine.tickOnce(t);
+    expect(violations.filter((v) => v.type === VIOLATION.NO_FACE_DETECTED)).toHaveLength(0);
+
+    for (let t = 1900; t <= 2100; t += 100) engine.tickOnce(t);
+    expect(violations.filter((v) => v.type === VIOLATION.NO_FACE_DETECTED)).toHaveLength(1);
   });
 });
