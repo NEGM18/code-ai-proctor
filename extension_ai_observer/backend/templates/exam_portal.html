@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Observer — Intelligent Proctoring</title>
+  <meta name="description" content="AI Observer — AI-powered exam proctoring, quiz management, and academic integrity platform." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/login.css" />
+</head>
+<body>
+  <!-- Particle canvas background -->
+  <canvas id="particleCanvas"></canvas>
+
+  <!-- Main login container -->
+  <div class="login-wrapper">
+    <!-- Logo -->
+    <div class="logo-area">
+      <div class="logo-icon">
+        <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Shield shape -->
+          <path d="M40 4L8 18v22c0 18.6 13.6 35.8 32 40 18.4-4.2 32-21.4 32-40V18L40 4z" fill="rgba(230,57,70,0.12)" stroke="#e63946" stroke-width="2.5"/>
+          <!-- Eye outer -->
+          <ellipse cx="40" cy="36" rx="18" ry="12" fill="none" stroke="#e63946" stroke-width="2"/>
+          <!-- Iris -->
+          <circle cx="40" cy="36" r="7" fill="#e63946" opacity="0.9"/>
+          <!-- Pupil -->
+          <circle cx="40" cy="36" r="3" fill="#1a1a1a"/>
+          <!-- Shine -->
+          <circle cx="43" cy="33" r="1.5" fill="#fff" opacity="0.8"/>
+          <!-- AI label -->
+          <text x="40" y="62" text-anchor="middle" font-family="Inter, sans-serif" font-size="8" font-weight="800" fill="#e63946" letter-spacing="1.5">AI OBSERVER</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Login Card -->
+    <div class="login-card">
+      <!-- Role Selector -->
+      <div class="role-selector">
+        <button type="button" class="role-btn active" data-role="organization">
+          <span class="role-icon">🏛️</span>
+          <span>Organization</span>
+        </button>
+        <button type="button" class="role-btn" data-role="teacher">
+          <span class="role-icon">👨‍🏫</span>
+          <span>Teacher</span>
+        </button>
+        <button type="button" class="role-btn" data-role="student">
+          <span class="role-icon">🎓</span>
+          <span>Student</span>
+        </button>
+      </div>
+
+      <!-- Login Form -->
+      <form id="loginForm" autocomplete="on">
+        <div class="input-group">
+          <label for="login_email">Email</label>
+          <input id="login_email" type="email" required autocomplete="username" placeholder="your@email.edu" />
+        </div>
+        <div class="input-group">
+          <label for="login_password">Password</label>
+          <input id="login_password" type="password" required autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <button type="submit" class="login-btn" id="loginBtn">
+          <span class="btn-text">Log in</span>
+          <span class="btn-spinner" hidden></span>
+        </button>
+      </form>
+
+      <div id="loginMsg" class="login-msg"></div>
+
+      <a href="#" class="forgot-link">Lost password?</a>
+
+      <!-- Divider -->
+      <div class="divider">
+        <span>or</span>
+      </div>
+
+      <!-- Microsoft SSO placeholder -->
+      <button type="button" class="sso-btn" id="ssoBtn">
+        <svg width="20" height="20" viewBox="0 0 21 21">
+          <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+          <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+          <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+          <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+        </svg>
+        <span>Microsoft</span>
+      </button>
+    </div>
+
+    <!-- Create Organization Link -->
+    <div class="create-org-link">
+      New institution? <a href="/org-signup">Create Organization Account</a>
+    </div>
+
+    <!-- Footer -->
+    <footer class="login-footer">
+      <div class="footer-links">
+        <div class="lang-selector">
+          English (en) <span class="caret">▾</span>
+        </div>
+        <a href="#" class="footer-link">Cookies notice</a>
+        <a href="/docs" class="footer-link">API Docs</a>
+      </div>
+      <div class="footer-copy">© 2026 AI Observer — Intelligent Proctoring Platform</div>
+    </footer>
+  </div>
+
+  <script src="/static/js/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# PyTorch is NOT listed here on purpose: plain `pip install torch` often installs
+# the CPU-only wheel (+cpu) on Windows, and `torch.cuda.is_available()` stays False.
+#
+# 1) Remove any CPU build, then install CUDA wheels from PyTorch (pick ONE index):
+#    pip uninstall -y torch torchvision torchaudio
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# 2) Verify the build string includes +cu124 (not +cpu):
+#    python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+# See https://pytorch.org/get-started/locally/
+
+ultralytics>=8.3.0
+# Full OpenCV with HighGUI (cv2.imshow). If you see "imshow ... not implemented", run:
+#   pip uninstall -y opencv-python-headless
+#   pip install opencv-python
+opencv-python>=4.8.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
+jinja2>=3.1.0
+pillow>=10.0.0
+numpy>=1.26.0
+sqlalchemy>=2.0.0
+pyodbc>=5.1.0
+pymysql>=1.1.0
+bcrypt>=4.1.0
+email-validator>=2.0.0
+requests>=2.31.0
+google-genai>=1.0.0
+PyPDF2>=3.0.0
+python-dotenv>=1.0.0

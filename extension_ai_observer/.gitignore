@@ -51,3 +51,21 @@ uploads/
 # successfully and then renders broken images.
 !extension/assets/*.png
 !safe-test-dashboard/public/brand/*.png
+
+# Packed extension. Regenerated from extension/ on demand and ~22 MB a copy, so
+# every re-pack would add another full blob to history for a file that is a pure
+# function of tracked sources. The models under backend/static/models/ are the
+# opposite case and ARE tracked: they are build OUTPUTS of the training scripts,
+# but nothing in the repo can reproduce them without the dataset and a GPU.
+ai-observer-extension-v2.0.0.zip
+*.crx
+
+# Scratch backups taken while re-exporting the classifier at 224 (best.pt.demo,
+# best.onnx.224demo, served_best.onnx.224demo). Superseded by the tracked
+# weights/best.onnx, and ~15 MB. Safe to delete.
+_demo_backup/
+
+# Local Claude Code configuration. settings.local.json is machine-specific by
+# name and already ignored by the tool's own convention; claude.md here is empty
+# and the authored guidance lives in the tracked CLAUDE.md at the repo root.
+.claude/

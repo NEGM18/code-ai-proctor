@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./weights:/app/weights:ro
+      - ./uploads:/app/uploads
+      - ./.env:/app/.env:ro
+      - ./yolo11n-cls.pt:/app/yolo11n-cls.pt:ro
+      - ./yolo26n.pt:/app/yolo26n.pt:ro
+    env_file:
+      - .env
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 6G

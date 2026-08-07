@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.git
+.env
+runs/
+demo_proctor_dataset/
+_unlabeled_review/
+online exam cheating detection.v15i.folder/
+*.pt
+uploads/
+.dockerignore
+Dockerfile
+docker-compose.yml

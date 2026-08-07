@@ -1,0 +1,7 @@
+# Ultralytics YOLO classification dataset (paths relative to this file's directory)
+path: online exam cheating detection.v15i.folder
+train: train
+val: valid
+test: test
+nc: 2
+names: ["cheating", "normal"]
