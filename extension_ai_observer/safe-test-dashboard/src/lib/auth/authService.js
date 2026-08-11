@@ -6,13 +6,6 @@
 //
 //   { ok: boolean, reason: string | null, data: T | null, error: unknown }
 //
-// `ok: false` with a specific `reason` is a first-class outcome, not an
-// exception. When Supabase isn't configured, every function returns
-// `{ ok: false, reason: SUPABASE_UNCONFIGURED_REASON, ... }` immediately,
-// with NO network call attempted — the same "explicit no-op" contract
-// src/lib/demoSnapshots.js follows for uploads. A caller (a sign-up form)
-// can render "auth is unavailable in local-only mode" straight off `reason`
-// without inspecting an error object that doesn't exist.
 // =============================================================================
 
 import { supabase, isSupabaseConfigured, SUPABASE_UNCONFIGURED_REASON } from '../supabase.js'
@@ -30,11 +23,8 @@ function unconfiguredResult() {
 }
 
 /**
- * Sign up a new account under one of the three roles. `role`/`full_name`/
- * `organization_name` ride in `auth.signUp`'s `options.data`
- * (raw_user_meta_data), which `handle_new_user()` (see the profiles
- * migration) reads to populate the `profiles` row — this function never
- * writes to `profiles` directly, that table has no client INSERT grant.
+ * Sign up a new account using Email + Password under one of the three roles.
+ * Minimum password length is 6 characters.
  *
  * @param {{ email: string, password: string, role: string, fullName?: string, organizationName?: string }} params
  * @returns {Promise<AuthResult>}
@@ -47,6 +37,9 @@ export async function signUpWithRole({ email, password, role, fullName, organiza
   }
   if (!email || !password) {
     return { ok: false, reason: 'MISSING_CREDENTIALS', data: null, error: null }
+  }
+  if (password.length < 6) {
+    return { ok: false, reason: 'WEAK_PASSWORD', data: null, error: null }
   }
   if (role === ROLE.ORGANIZATION && !organizationName) {
     return { ok: false, reason: 'ORGANIZATION_NAME_REQUIRED', data: null, error: null }
@@ -69,6 +62,9 @@ export async function signUpWithRole({ email, password, role, fullName, organiza
 }
 
 /**
+ * Sign in using Email + Password.
+ * NO OTP or verification emails are dispatched during sign in.
+ *
  * @param {{ email: string, password: string }} params
  * @returns {Promise<AuthResult>}
  */
@@ -83,12 +79,104 @@ export async function signInWithPassword({ email, password } = {}) {
   return { ok: true, reason: null, data, error: null }
 }
 
+// -----------------------------------------------------------------------------
+// Google OAuth
+// -----------------------------------------------------------------------------
+
+export const DEFAULT_OAUTH_REDIRECT_PATH = '/demo-quiz'
+export const EMAIL_CODE_LENGTH = 6
+
 /**
- * Signing out of a session that was never real (no Supabase configured, no
- * session to begin with) is trivially successful — there is nothing to undo
- * — so this is the one function that returns `ok: true` in the unconfigured
- * case, while STILL reporting the reason so a caller can tell "we signed
- * out" from "there was never anything to sign out of".
+ * Start the Google OAuth redirect flow.
+ *
+ * @param {{ redirectTo?: string }} [params]
+ * @returns {Promise<AuthResult>}
+ */
+export async function signInWithGoogle({ redirectTo } = {}) {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredResult()
+
+  const target = redirectTo
+    ?? (typeof window !== 'undefined'
+      ? `${window.location.origin}${DEFAULT_OAUTH_REDIRECT_PATH}`
+      : undefined)
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: target },
+  })
+
+  if (error) return { ok: false, reason: 'SUPABASE_ERROR', data: null, error }
+  return { ok: true, reason: null, data, error: null }
+}
+
+// -----------------------------------------------------------------------------
+// Email OTP verification (for sign-up confirmation)
+// -----------------------------------------------------------------------------
+
+/**
+ * Re-send 6-digit OTP code to an email address.
+ *
+ * @param {{ email: string }} params
+ * @returns {Promise<AuthResult>}
+ */
+export async function sendEmailCode({ email } = {}) {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredResult()
+  if (!email) return { ok: false, reason: 'MISSING_CREDENTIALS', data: null, error: null }
+
+  const { data, error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+  })
+
+  if (error) {
+    // Fallback to signInWithOtp if resend is not enabled for signup
+    const fallback = await supabase.auth.signInWithOtp({ email })
+    if (fallback.error) return { ok: false, reason: 'SUPABASE_ERROR', data: null, error: fallback.error }
+    return { ok: true, reason: null, data: fallback.data, error: null }
+  }
+  return { ok: true, reason: null, data, error: null }
+}
+
+/**
+ * Exchange the 6-digit email confirmation code.
+ *
+ * @param {{ email: string, token: string, type?: 'signup' | 'email' }} params
+ * @returns {Promise<AuthResult>}
+ */
+export async function verifyEmailCode({ email, token, type = 'signup' } = {}) {
+  if (!isSupabaseConfigured || !supabase) return unconfiguredResult()
+  if (!email || !token) {
+    return { ok: false, reason: 'MISSING_CREDENTIALS', data: null, error: null }
+  }
+
+  const cleaned = String(token).replace(/\D/g, '')
+  if (cleaned.length !== EMAIL_CODE_LENGTH) {
+    return { ok: false, reason: 'INVALID_CODE_FORMAT', data: null, error: null }
+  }
+
+  let response = await supabase.auth.verifyOtp({
+    email,
+    token: cleaned,
+    type,
+  })
+
+  if (response.error && type === 'signup') {
+    const fallbackResponse = await supabase.auth.verifyOtp({
+      email,
+      token: cleaned,
+      type: 'email',
+    })
+    if (!fallbackResponse.error) {
+      response = fallbackResponse
+    }
+  }
+
+  if (response.error) return { ok: false, reason: 'SUPABASE_ERROR', data: null, error: response.error }
+  return { ok: true, reason: null, data: response.data, error: null }
+}
+
+/**
+ * Sign out of current session.
  * @returns {Promise<{ ok: boolean, reason: string | null, error: unknown }>}
  */
 export async function signOutCurrentUser() {
@@ -101,10 +189,7 @@ export async function signOutCurrentUser() {
 }
 
 /**
- * Reads the caller's own profile row. RLS (`profiles_select_own`) already
- * enforces `auth.uid() = id` server-side; passing `userId` explicitly here
- * just avoids an extra `getUser()` round trip when the caller already has it
- * (e.g. from `onAuthStateChange`).
+ * Reads the caller's own profile row.
  * @param {string} userId
  * @returns {Promise<AuthResult>}
  */

@@ -19,6 +19,12 @@ import Unreadable from './Unreadable.jsx';
 const UPLOAD_COPY = {
   [SNAPSHOT_UPLOAD_REASON.SUPABASE_UNCONFIGURED]:
     'Supabase not configured — evidence stays in this tab and is never uploaded.',
+  [SNAPSHOT_UPLOAD_REASON.NOT_SIGNED_IN]:
+    'Not signed in — evidence stays in this tab and is never uploaded.',
+  [SNAPSHOT_UPLOAD_REASON.UNVERIFIED_SESSION]:
+    'Sign-in not finished (email code outstanding) — evidence stays local.',
+  // Kept in step with the retained constant in demoSnapshots.js: nothing emits
+  // this any more, but a reason with no copy renders as a blank explanation.
   [SNAPSHOT_UPLOAD_REASON.ANONYMOUS_AUTH_FAILED]:
     'Anonymous session unavailable — evidence stays local.',
   [SNAPSHOT_UPLOAD_REASON.NO_IMAGE_DATA]:

@@ -156,11 +156,41 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+#
+# ⚠ THIS IS THE PREVIEW ORIGIN, NOT localhost, AND THAT IS DELIBERATE.
+# There is no localhost testing target for this app: neither the hosted Supabase
+# project nor the Google OAuth client was ever given a localhost redirect, so a
+# sign-in started on 127.0.0.1 cannot complete. `procminds-preview.pages.dev` is
+# the throwaway twin of procminds.com and is where auth is exercised. The hosted
+# project keeps its OWN copy of this value at Dashboard -> Authentication -> URL
+# Configuration -> Site URL, it defaults to `http://localhost:3000`, and this
+# file does not reach it — set it there too, or every unlisted redirect and
+# every `{{ .SiteURL }}` in an email lands on localhost.
+site_url = "https://procminds-preview.pages.dev"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+#
+# ⚠ GOOGLE SIGN-IN LANDS HERE, SO AN ABSENT ENTRY IS THE FAILURE MODE.
+# `signInWithGoogle()` passes `redirectTo: <origin>/demo-quiz` so the visitor
+# arrives back on the page they were trying to reach. GoTrue matches that value
+# against this allow-list EXACTLY; anything unlisted is silently rewritten to
+# `site_url`, which reads as "Google worked but dropped me on the homepage".
+# The hosted project keeps its own copy of this list at Dashboard ->
+# Authentication -> URL Configuration — this file does not reach it.
+#
+# ⚠ NO localhost / 127.0.0.1 ENTRIES, ON PURPOSE (removed 2026-08-11). Listing
+# them here does not make a local sign-in work — the hosted project and the
+# Google OAuth client are the two things that would have to allow it, and
+# neither does — so their only effect was to imply a testing route that does
+# not exist. Test on the preview.
+additional_redirect_urls = [
+  "https://subbasepreview.dev/demo-quiz",
+  "https://subbasepreview.dev/",
+  "https://procminds-preview.pages.dev/demo-quiz",
+  "https://procminds.com/demo-quiz",
+  "https://safetest.space/demo-quiz",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -196,7 +226,14 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+#
+# ⚠ RAISED FROM THE DEFAULT OF 2, AND THE DEFAULT IS ACTIVELY HOSTILE TO THIS
+# DESIGN. Every password sign-in now sends a code, so a single person testing
+# the flow three times in an hour hits a 2/hour cap — and the failure surfaces
+# to them as a sign-in that simply does not work, with the real reason only
+# visible in the Auth logs. Raise the hosted project's equivalent too:
+# Dashboard -> Authentication -> Rate Limits -> "Rate limit for sending emails".
+email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -223,6 +260,17 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
+#
+# ⚠ DELIBERATELY FALSE, AND THAT IS NOT A GAP — THE VERIFICATION MOVED, IT DID
+# NOT DISAPPEAR. This project verifies the mailbox with a 6-digit code at EVERY
+# password sign-in (`signInWithOtp` -> `verifyOtp`), which is strictly stronger
+# than a link clicked once at sign-up: `session_is_verified_human()` in
+# 20260810120000_verified_session_gate.sql rejects a password-only session
+# outright, so an unconfirmed address can hold a password token and still reach
+# nothing. Turning this ON as well would add a second email to every sign-up
+# and, with the 2-per-hour default in [auth.rate_limit] below, would routinely
+# consume the visitor's whole quota before they ever get the code they actually
+# need to log in.
 enable_confirmations = false
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
@@ -242,6 +290,28 @@ otp_expiry = 3600
 # pass = "env(SENDGRID_API_KEY)"
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
+
+# -----------------------------------------------------------------------------
+# The 6-digit sign-in code email.
+#
+# `signInWithOtp()` on an EXISTING account sends the **magic_link** template —
+# not `confirmation`, which is the sign-up one and is never sent here because
+# `enable_confirmations` is false above. Getting that mapping wrong is the
+# classic way to spend an afternoon restyling a template nobody receives.
+#
+# ⚠ LOCAL STACK ONLY. The hosted project reads nothing from this file: the same
+# HTML has to be pasted into Dashboard -> Authentication -> Email Templates ->
+# Magic Link, with the subject below. The .html file in the repo is the source
+# of truth and the Dashboard is a copy — they drift silently, and the only
+# symptom is production mail looking nothing like what you tested locally.
+#
+# ⚠ THE TEMPLATE MUST CONTAIN `{{ .Token }}`. That is the 6 digits. A template
+# built around `{{ .ConfirmationURL }}` instead renders, sends and reports
+# success while the visitor has nothing to type into the code step.
+# `email_template.test.js` pins this.
+[auth.email.template.magic_link]
+subject = "Your Procminds sign-in code"
+content_path = "./safe-test-dashboard/supabase/templates/magic_link.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
@@ -332,6 +402,36 @@ url = ""
 # If enabled, the nonce check will be skipped. Required for local sign in with Google auth.
 skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
+email_optional = false
+
+# -----------------------------------------------------------------------------
+# Google — the OAuth half of the demo's sign-in wall.
+#
+# ⚠ THIS BLOCK CONFIGURES `supabase start` ONLY. The hosted project reads
+# NOTHING from this file: the same two values have to be entered at
+# Dashboard -> Authentication -> Providers -> Google, and the Google Cloud
+# OAuth client needs `https://<project-ref>.supabase.co/auth/v1/callback` in
+# its Authorised redirect URIs. A local-only change here looks like a working
+# Google button that fails the moment it is deployed.
+#
+# ⚠ `email_optional = false` IS LOAD-BEARING HERE, unlike in the Apple block
+# above where it is just a default. The whole point of accepting Google is that
+# Google has already proved the mailbox; an identity that arrives without an
+# email address proves nothing, and `session_is_verified_human()` would then be
+# granting demo access to an account with no mailbox behind it at all.
+# -----------------------------------------------------------------------------
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+# DO NOT commit your OAuth provider secret to git.
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+redirect_uri = ""
+url = ""
+# Required for local sign-in with Google against the CLI stack — the local
+# GoTrue cannot complete Google's nonce check. Leave this FALSE in the hosted
+# project (the Dashboard has no such switch, which is the point: production
+# does the check).
+skip_nonce_check = true
 email_optional = false
 
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.

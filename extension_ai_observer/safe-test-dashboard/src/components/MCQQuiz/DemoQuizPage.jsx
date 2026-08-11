@@ -1,13 +1,23 @@
 // =============================================================================
-// DemoQuizPage — Anonymous Guest Quiz Session (/demo-quiz).
+// DemoQuizPage — signed-in practice assessment (/demo-quiz).
 //
 // 5-Question Practice Assessment proctored live by AI Observer.
-// Zero sign-in or proctoring code required. Starts immediately on page load.
+//
+// ⚠ THIS PAGE IS NO LONGER REACHABLE ANONYMOUSLY, AND ITS COPY SAYS SO.
+// It used to open on page load for anybody and labelled the result "Anonymous
+// Guest Session". `App.jsx` now renders it only inside `<DemoGate>`, which
+// requires a session verified by Google or by the emailed code. This component
+// does NOT re-check that — one gate, in one place — but it must never be
+// mounted outside it, because its mount effect opens the camera.
+//
+// The identity shown below is display only. Authorisation happened at the gate
+// and is re-enforced by RLS on every upload.
 // =============================================================================
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { LIVE_STATUS, VISION_STATUS, useExtensionBridge } from '../../hooks/useExtensionBridge.js';
+import { useAuth } from '../../lib/auth/useAuth.js';
 import { navigate } from '../../lib/route.js';
 import EvidencePanel from './EvidencePanel.jsx';
 
@@ -107,6 +117,12 @@ function HudRow({ label, value, tone = 'text-slate-200' }) {
 
 export default function DemoQuizPage() {
   const bridge = useExtensionBridge();
+  const { user, profile } = useAuth();
+  const candidateEmail = user?.email ?? null;
+  const candidateName = profile?.full_name
+    ?? user?.user_metadata?.full_name
+    ?? user?.user_metadata?.name
+    ?? null;
 
   const [remaining, setRemaining] = useState(EXAM_SECONDS);
   const [answers, setAnswers] = useState({});
@@ -355,7 +371,8 @@ export default function DemoQuizPage() {
               Foundations of Computing — Practice Assessment (5 Questions)
             </h1>
             <p className="text-[11px] text-slate-500 truncate">
-              Anonymous Guest Session · Proctored by AI Observer Browser Extension
+              {candidateName || candidateEmail || 'Signed-in session'}
+              {' · '}Proctored by AI Observer Browser Extension
             </p>
           </div>
         </div>
@@ -418,6 +435,27 @@ export default function DemoQuizPage() {
           </div>
         )}
       </div>
+
+      {/* ---- Proctoring refused for want of a verified session ----
+           ⚠ NOT AN ADVISORY, AND NOT DISMISSIBLE. Every other banner on this
+           page describes a degraded-but-running session; this one means the
+           proctoring stack never started. In a product that accuses people of
+           misconduct, "nothing is watching" must never be presented in the same
+           register as "your window is not fullscreen". It should be unreachable
+           — DemoGate stops this page mounting unverified — so if it is on
+           screen, the gate has been bypassed and that is worth saying loudly. */}
+      {bridge.blockedReason ? (
+        <div className="px-4 pt-3 sm:px-6">
+          <div
+            role="alert"
+            className="rounded-md border border-violation/50 bg-violation/10 px-4 py-2.5 text-xs sm:text-sm text-violation"
+          >
+            <strong>Proctoring did not start.</strong> This session is not signed
+            in ({bridge.blockedReason}). Nothing is being monitored or recorded —
+            return to the site and sign in to run the demo.
+          </div>
+        </div>
+      ) : null}
 
       {/* ---- Soft full-screen advisory ----
            Advisory only: it never reports a violation and never stops the
@@ -587,8 +625,8 @@ export default function DemoQuizPage() {
                 tone={bridge.extensionDetected ? 'text-verified font-semibold' : 'text-amber-400'}
               />
               <HudRow
-                label="Session Mode"
-                value="Anonymous Guest"
+                label="Candidate"
+                value={candidateEmail ?? 'Signed in'}
                 tone="text-cyan-300"
               />
               <HudRow
@@ -598,7 +636,7 @@ export default function DemoQuizPage() {
               />
               <HudRow
                 label="Backend Uploads"
-                value="Disabled (Local Holding Only)"
+                value={bridge.guestSessionId ? 'Scoped to your account' : 'Disabled (Local Holding Only)'}
                 tone="text-slate-400"
               />
               {/* ⚠ TWO SEPARATE ROWS, AND THEY MUST STAY SEPARATE.

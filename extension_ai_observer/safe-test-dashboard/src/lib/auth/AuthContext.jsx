@@ -11,7 +11,22 @@
 
 import { useEffect, useState } from 'react'
 import { supabase, isSupabaseConfigured, SUPABASE_UNCONFIGURED_REASON } from '../supabase.js'
-import { fetchOwnProfile, signInWithPassword, signOutCurrentUser, signUpWithRole } from './authService.js'
+import {
+  fetchOwnProfile,
+  sendEmailCode,
+  signInWithGoogle,
+  signInWithPassword,
+  signOutCurrentUser,
+  signUpWithRole,
+  verifyEmailCode,
+} from './authService.js'
+import {
+  SESSION_STATE,
+  isAnonymousSession,
+  isVerifiedSession,
+  sessionEmail,
+  sessionState,
+} from './session.js'
 import { AuthContext } from './context.js'
 
 const UNCONFIGURED_STATE = {
@@ -42,6 +57,27 @@ export function AuthProvider({ children }) {
     let cancelled = false
 
     async function applySession(session) {
+      // ---- evict any surviving anonymous session ----
+      //
+      // ⚠ THIS IS THE MIGRATION PATH FOR THE GUEST PROBLEM, NOT A TIDY-UP.
+      // `persistSession: true` means every visitor who opened the demo before
+      // this change still has a working anonymous token in localStorage, and it
+      // stays valid until it expires. Without this, those visitors keep a
+      // session that reads as signed-in to `useAuth()` while every RLS policy
+      // now refuses it — the exact "UI says fine, server says no" split the
+      // sign-in wall exists to prevent. Signing them out converts a stale guest
+      // into a clean SIGNED_OUT visitor who is shown the wall.
+      //
+      // Fires at most once per stale token: signOut triggers onAuthStateChange
+      // with a null session, which takes the branch below instead.
+      if (session && isAnonymousSession(session)) {
+        await signOutCurrentUser()
+        if (!cancelled) {
+          setState({ loading: false, session: null, user: null, profile: null, profileError: null })
+        }
+        return
+      }
+
       const user = session?.user ?? null
       if (!user) {
         if (!cancelled) {
@@ -85,9 +121,29 @@ export function AuthProvider({ children }) {
     user: state.user,
     profile: state.profile,
     profileError: state.profileError,
+
+    // ---- the demo's admission ticket ----
+    //
+    // ⚠ `verified` IS NOT `!!user`, AND CONFLATING THEM REOPENS THE HOLE.
+    // A password-only session has a real `user` and is deliberately NOT
+    // verified — the emailed code has not been entered yet, so its JWT lacks
+    // the `amr` claim RLS requires. Every gate must read `verified`; a `user`
+    // truthiness check would wave through exactly the sessions the second
+    // factor exists to stop. See lib/auth/session.js.
+    verified: isVerifiedSession(state.session),
+    // Which of the four states, for the UI: "sign in", "you are a guest",
+    // "enter the code we emailed" and "you're in" are four different messages.
+    sessionStatus: isSupabaseConfigured ? sessionState(state.session) : SESSION_STATE.SIGNED_OUT,
+    // The address a pending code should go to, so the code step never asks a
+    // visitor to retype an address they have already proved they can spell.
+    pendingEmail: sessionEmail(state.session),
+
     signUp: signUpWithRole,
     signIn: signInWithPassword,
     signOut: signOutCurrentUser,
+    signInWithGoogle,
+    sendEmailCode,
+    verifyEmailCode,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

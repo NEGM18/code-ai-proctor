@@ -44,15 +44,39 @@ import InstitutionalValue from './components/site/InstitutionalValue.jsx';
 import Pricing from './components/site/Pricing.jsx';
 import ContactForm from './components/site/ContactForm.jsx';
 import AuthModal from './components/site/AuthModal.jsx';
+import DemoGate from './components/site/DemoGate.jsx';
 import Footer from './components/site/Footer.jsx';
+import { useAuth } from './lib/auth/useAuth.js';
 
 export default function App() {
   const pathname = usePathname();
+  const { verified } = useAuth();
   const [authModal, setAuthModal] = useState(null);
 
   // ---- live demo navigation ----
+  //
+  // ⚠ THE CTA STILL NAVIGATES WHEN SIGNED OUT — it does not silently become a
+  // sign-in button. `DemoGate` owns the wall, so sending an unverified visitor
+  // to /demo-quiz shows them what they are signing in FOR, and leaves them on
+  // the url Google will return them to. Opening the modal here instead is only
+  // a shortcut for the common case, and it must never be the only path: a
+  // direct link, a bookmark and a refresh all arrive at the route without
+  // passing through this callback.
   const openDemo = useCallback(() => {
+    if (!verified) {
+      setAuthModal({ mode: 'signin', intent: 'demo' });
+      return;
+    }
     navigate('/demo-quiz');
+  }, [verified]);
+
+  // Sign-in that STARTED as "take me to the demo" finishes there. Without this
+  // the visitor completes the code step, the modal closes, and they are back on
+  // the landing page having to find the button again — which reads as the
+  // sign-in having failed.
+  const onAuthVerified = useCallback((intent) => {
+    setAuthModal(null);
+    if (intent === 'demo') navigate('/demo-quiz');
   }, []);
 
   // ---- auth modal helpers ----
@@ -62,9 +86,20 @@ export default function App() {
   // Pricing "onChoose" opens sign-up with the chosen tier's role pre-selected.
   const onPricingChoose = useCallback((role) => setAuthModal({ mode: 'signup', role }), []);
 
-  // Check demo-quiz route first
+  // Check demo-quiz route first.
+  //
+  // ⚠ THE GATE WRAPS IT — IT IS NOT A REDIRECT, AND THAT IS DELIBERATE.
+  // Bouncing an unverified visitor to "/" would lose the fact that they were
+  // trying to reach the demo, and Google's OAuth round trip returns them to
+  // THIS url; a redirect here would fight that landing. DemoGate renders the
+  // wall in place and swaps in the demo the instant the session is verified,
+  // so the post-Google return lands straight in the exam.
   if (pathname === '/demo-quiz' || pathname === '/demo') {
-    return <DemoQuizPage />;
+    return (
+      <DemoGate>
+        <DemoQuizPage />
+      </DemoGate>
+    );
   }
 
   // Strip the leading slash once: "/privacy" -> "privacy", matching the keys in LEGAL_SLUGS.
@@ -93,6 +128,7 @@ export default function App() {
           mode={authModal.mode}
           initialRole={authModal.role}
           onClose={closeAuth}
+          onVerified={() => onAuthVerified(authModal.intent)}
         />
       ) : null}
     </>

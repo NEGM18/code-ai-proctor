@@ -14,9 +14,23 @@
 // =============================================================================
 
 import { supabase, isSupabaseConfigured, SUPABASE_UNCONFIGURED_REASON, DEMO_SNAPSHOTS_BUCKET } from './supabase.js'
+import { isVerifiedSession } from './auth/session.js'
 
 export const SNAPSHOT_UPLOAD_REASON = Object.freeze({
   SUPABASE_UNCONFIGURED: SUPABASE_UNCONFIGURED_REASON,
+  /** No session at all. */
+  NOT_SIGNED_IN: 'NOT_SIGNED_IN',
+  /** A session exists but is anonymous, or password-only with the emailed code
+   *  still outstanding — see lib/auth/session.js. */
+  UNVERIFIED_SESSION: 'UNVERIFIED_SESSION',
+  /**
+   * ⚠ RETAINED, NO LONGER PRODUCED. `ensureDemoSession` used to call
+   * `signInAnonymously()` and emit this when it failed; nothing does now. It
+   * stays defined because `DemoDiagnostics.jsx` keys copy off these constants
+   * and a missing key renders as a blank explanation — the exact silence the
+   * reason-code contract exists to avoid. Delete it only together with that
+   * copy entry.
+   */
   ANONYMOUS_AUTH_FAILED: 'ANONYMOUS_AUTH_FAILED',
   NO_IMAGE_DATA: 'NO_IMAGE_DATA',
   UPLOAD_FAILED: 'UPLOAD_FAILED',
@@ -36,18 +50,31 @@ function randomUuid() {
 /**
  * Resolves a usable session identifier for the demo.
  *
- * - Supabase unconfigured -> a local-only random id. `remote: false`.
- * - Supabase configured -> reuses an existing Supabase Auth session if one
- *   exists (real sign-up/sign-in OR a prior anonymous sign-in), otherwise
- *   calls `signInAnonymously()`. The bucket's RLS policies key off
- *   `auth.uid()`, not an arbitrary client-supplied string (see the
- *   migration's "Access model" comment for why), so `sessionId` for a
- *   *remote* session IS the caller's `auth.uid()` — the upload path is
- *   `demo/{auth.uid()}/...`.
- * - Supabase configured but anonymous sign-in fails or is disabled on the
- *   project -> falls back to a local-only id, `remote: false`, with
- *   `reason: 'ANONYMOUS_AUTH_FAILED'`. This is the explicit-no-op path for
- *   "we tried, it didn't work" rather than silently pretending success.
+ * ⚠ IT NO LONGER MINTS A SESSION. THIS FUNCTION IS WHERE THE GUEST PROBLEM
+ * LIVED.
+ *
+ * It used to call `signInAnonymously()` for any visitor without a session, and
+ * that single line was the whole of "anyone can try the live demo": Supabase
+ * hands an anonymous visitor a real JWT with `role: authenticated`, which every
+ * pre-existing RLS policy accepted. The demo, the evidence bucket and the
+ * violation tables were therefore open to anybody who loaded the page.
+ *
+ * It now only ever REPORTS what the caller already has. Verification is
+ * `isVerifiedSession` — Google, or password plus the emailed code — the same
+ * predicate `session_is_verified_human()` enforces server-side, so a caller can
+ * never be told "remote" about a session the database will refuse.
+ *
+ * - Supabase unconfigured        -> local-only random id, `remote: false`.
+ * - No session                   -> local-only id, `reason: NOT_SIGNED_IN`.
+ * - Anonymous / password-only    -> local-only id, `reason: UNVERIFIED_SESSION`.
+ * - Verified session             -> `remote: true`, `sessionId` IS `auth.uid()`,
+ *                                   so the upload path is `demo/{auth.uid()}/…`
+ *                                   exactly as the bucket policy requires.
+ *
+ * ⚠ THE LOCAL-ONLY FALLBACK IS NOT A BACK DOOR. It returns an id for labelling
+ * in-page state and sets `remote: false`, which every upload path checks before
+ * doing anything — it grants no access, it just keeps the caller from crashing
+ * on a null. The access decision is made by RLS, not here.
  *
  * @param {string | null | undefined} existingSessionId Reuse this local id
  *   if falling back to local-only and no better id is available.
@@ -66,29 +93,37 @@ export async function ensureDemoSession(existingSessionId) {
 
   try {
     const { data: sessionData } = await supabase.auth.getSession()
-    const existingUserId = sessionData?.session?.user?.id
-    if (existingUserId) {
-      return { ok: true, remote: true, sessionId: existingUserId, reason: null, error: null }
-    }
+    const session = sessionData?.session ?? null
 
-    const { data, error } = await supabase.auth.signInAnonymously()
-    const userId = data?.user?.id
-    if (error || !userId) {
+    if (!session) {
       return {
         ok: false,
         remote: false,
         sessionId: existingSessionId || randomUuid(),
-        reason: SNAPSHOT_UPLOAD_REASON.ANONYMOUS_AUTH_FAILED,
-        error: error ?? null,
+        reason: SNAPSHOT_UPLOAD_REASON.NOT_SIGNED_IN,
+        error: null,
       }
     }
-    return { ok: true, remote: true, sessionId: userId, reason: null, error: null }
+
+    if (!isVerifiedSession(session)) {
+      return {
+        ok: false,
+        remote: false,
+        sessionId: existingSessionId || randomUuid(),
+        reason: SNAPSHOT_UPLOAD_REASON.UNVERIFIED_SESSION,
+        error: null,
+      }
+    }
+
+    return { ok: true, remote: true, sessionId: session.user.id, reason: null, error: null }
   } catch (error) {
+    // Reading the session threw (storage access blocked, corrupt persisted
+    // token). Fail closed to local-only, same direction as isVerifiedSession.
     return {
       ok: false,
       remote: false,
       sessionId: existingSessionId || randomUuid(),
-      reason: SNAPSHOT_UPLOAD_REASON.ANONYMOUS_AUTH_FAILED,
+      reason: SNAPSHOT_UPLOAD_REASON.NOT_SIGNED_IN,
       error,
     }
   }
@@ -159,7 +194,7 @@ export async function uploadDemoSnapshot({ sessionId, filename, dataUrl, blob, c
     return {
       ok: false,
       uploaded: false,
-      reason: resolvedSession.reason ?? SNAPSHOT_UPLOAD_REASON.ANONYMOUS_AUTH_FAILED,
+      reason: resolvedSession.reason ?? SNAPSHOT_UPLOAD_REASON.UNVERIFIED_SESSION,
       sessionId: resolvedSession.sessionId,
       path: null,
       error: resolvedSession.error,

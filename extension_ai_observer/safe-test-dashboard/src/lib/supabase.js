@@ -50,10 +50,16 @@ const BASE64URL_SEGMENT = /^[A-Za-z0-9_-]+$/
 
 /**
  * base64url-decode a single JWT segment to a UTF-8 string.
+ *
+ * Exported so `lib/auth/session.js` can read the `amr` / `is_anonymous` claims
+ * off an access token without a second, subtly-different implementation of
+ * base64url padding sitting next to this one. One definition per repo — the
+ * same rule `ear_veto.js` follows for `eyeAspectRatio`.
+ *
  * @param {string} segment
  * @returns {string}
  */
-function base64UrlDecode(segment) {
+export function base64UrlDecode(segment) {
   const base64 = segment.replace(/-/g, '+').replace(/_/g, '/')
   const padLength = (4 - (base64.length % 4)) % 4
   const padded = base64 + '='.repeat(padLength)

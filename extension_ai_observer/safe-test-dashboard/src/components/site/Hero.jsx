@@ -88,9 +88,16 @@ export default function Hero({ onTryDemo }) {
           </a>
         </div>
 
+        {/* ⚠ "No account" USED TO BE HERE AND IS NOW FALSE. The demo sits
+            behind DemoGate — Google, or an email address and the code we mail
+            you. Leaving the old line would promise, on the primary CTA, the one
+            thing the very next screen refuses; a visitor who read it would take
+            the sign-in wall as a bug. "No card, no download" are both still
+            true and still worth saying, so only the false clause is gone. */}
         <p className="mt-4 text-xs text-slate-500">
-          Runs in your browser. No account, no card, no download — and the camera
-          stops the moment you close the panel.
+          Runs in your browser. Free to try, no card and no download — sign in
+          with Google or email, and the camera stops the moment you close the
+          panel.
         </p>
 
         <ul className="mt-8 flex flex-wrap items-center justify-center gap-x-5 gap-y-2">

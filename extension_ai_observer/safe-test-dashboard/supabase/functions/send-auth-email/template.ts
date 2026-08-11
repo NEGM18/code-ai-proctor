@@ -1,0 +1,273 @@
+// =============================================================================
+// send-auth-email/template.ts — the 6-digit code email, as HTML and plain text.
+//
+// Deliberately PURE and Deno-free: no `Deno.*`, no remote imports, no fetch.
+// That is what lets `__tests__/template.test.ts` run it under vitest alongside
+// the rest of the app. The one thing that can break this feature silently is
+// the code not appearing in the message that reaches the inbox, and a renderer
+// that can only be exercised by sending a real email cannot be tested for that.
+//
+// ⚠ EMAIL HTML IS NOT WEB HTML, AND THE DIFFERENCES HERE ARE ALL DELIBERATE:
+//
+//   - Tables, not flex/grid. Outlook renders through Word's engine; flex and
+//     grid collapse to a single unstyled column there.
+//   - Inline styles, not a <style> block. Gmail strips <head> on forwarded and
+//     clipped messages, which would leave the code rendered as unstyled body
+//     text — still readable, but it stops looking like anything we sent.
+//   - No external images and no web fonts. Most clients block remote images by
+//     default, and a code that lives in a blocked image is a code the recipient
+//     cannot read. Everything here is text or a background colour.
+//   - A preheader. Without one, clients pull the first text they find into the
+//     inbox preview line — usually markup fragments.
+//
+// ⚠ AND THE CODE IS SELECTABLE TEXT. Never render it as an image or split it
+// into per-character cells: people copy it, and password managers and iOS
+// autofill scrape it out of the message body.
+// =============================================================================
+
+/**
+ * `email_action_type` values GoTrue sends to the Send Email hook.
+ * @see https://supabase.com/docs/guides/auth/auth-hooks/send-email-hook
+ */
+export const EMAIL_ACTION = Object.freeze({
+  SIGNUP: 'signup',
+  MAGIC_LINK: 'magiclink',
+  RECOVERY: 'recovery',
+  INVITE: 'invite',
+  EMAIL_CHANGE: 'email_change',
+  EMAIL_CHANGE_CURRENT: 'email_change_current',
+  EMAIL_CHANGE_NEW: 'email_change_new',
+})
+
+export const BRAND = Object.freeze({
+  name: 'Procminds',
+  base: '#060b14',
+  surface: '#0f172a',
+  border: '#1e293b',
+  text: '#e2e8f0',
+  muted: '#94a3b8',
+  faint: '#64748b',
+  accent: '#22d3ee',
+})
+
+/** Mirrors `auth.email.otp_expiry` (3600s) in supabase/config.toml. */
+export const CODE_EXPIRY_MINUTES = 60
+
+/**
+ * Per-action copy.
+ *
+ * ⚠ THE COPY IS PER-ACTION BECAUSE THE STAKES ARE. "Here is your sign-in code"
+ * and "someone asked to reset your password" need to read differently: the
+ * second one is the message a recipient must be able to recognise as *not*
+ * something they did. Sending one generic body for both is how account-takeover
+ * attempts get mistaken for routine mail.
+ */
+const ACTION_COPY: Record<string, { subject: string, heading: string, lead: string }> = {
+  [EMAIL_ACTION.MAGIC_LINK]: {
+    subject: 'Your Procminds sign-in code',
+    heading: 'Confirm it is you',
+    lead: 'Enter this code to finish signing in. It confirms the mailbox is yours — the live demo does not open without it.',
+  },
+  [EMAIL_ACTION.SIGNUP]: {
+    subject: 'Confirm your Procminds account',
+    heading: 'Confirm your email address',
+    lead: 'Enter this code to finish creating your account.',
+  },
+  [EMAIL_ACTION.RECOVERY]: {
+    subject: 'Reset your Procminds password',
+    heading: 'Password reset requested',
+    lead: 'Enter this code to choose a new password. If you did not ask for this, you can ignore this email — your password will not change.',
+  },
+  [EMAIL_ACTION.INVITE]: {
+    subject: 'You have been invited to Procminds',
+    heading: 'Accept your invitation',
+    lead: 'Enter this code to set up your account.',
+  },
+  [EMAIL_ACTION.EMAIL_CHANGE]: {
+    subject: 'Confirm your new Procminds email address',
+    heading: 'Confirm your new address',
+    lead: 'Enter this code to move your account to this email address.',
+  },
+}
+
+// email_change_current / email_change_new are the two halves of the same
+// double-confirmation flow and read identically to the recipient.
+ACTION_COPY[EMAIL_ACTION.EMAIL_CHANGE_CURRENT] = ACTION_COPY[EMAIL_ACTION.EMAIL_CHANGE]
+ACTION_COPY[EMAIL_ACTION.EMAIL_CHANGE_NEW] = ACTION_COPY[EMAIL_ACTION.EMAIL_CHANGE]
+
+/**
+ * ⚠ AN UNKNOWN ACTION FALLS BACK — IT DOES NOT THROW.
+ *
+ * Throwing here would make the hook return an error, and GoTrue treats a failed
+ * Send Email hook as a failed auth request: a future GoTrue release adding a
+ * seventh action type would break sign-in for everyone rather than sending
+ * slightly generic wording for one flow. The code itself is correct in every
+ * case, which is the part that has to work.
+ */
+const FALLBACK_COPY = {
+  subject: 'Your Procminds verification code',
+  heading: 'Your verification code',
+  lead: 'Enter this code to continue.',
+}
+
+/**
+ * ⚠ ESCAPE EVERYTHING INTERPOLATED, INCLUDING VALUES FROM GoTrue.
+ *
+ * `token` is generated by GoTrue and is digits today, and `email` is validated
+ * on the way in — neither is attacker-controlled in the usual sense. They are
+ * escaped anyway because the cost is nothing and the alternative is a rule
+ * ("this particular field is safe") that has to stay true through every future
+ * change to who calls this. HTML injection into an email body is a phishing
+ * primitive: it renders in the recipient's client with our branding and our
+ * From: address behind it.
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+export interface AuthEmailInput {
+  /** GoTrue's `email_data.email_action_type`. */
+  actionType?: string
+  /** GoTrue's `email_data.token` — the 6-digit code. */
+  token: string
+  /** The recipient, echoed in the body so a misdirected code is obvious. */
+  email?: string | null
+  expiryMinutes?: number
+}
+
+export interface AuthEmailOutput {
+  subject: string
+  html: string
+  text: string
+}
+
+/**
+ * Render the code email.
+ *
+ * ⚠ NO LINK. NOT AN OVERSIGHT — A DECISION.
+ *
+ * GoTrue also supplies a `token_hash` that could be turned into a one-click
+ * confirmation URL, and most auth emails include one. This one does not, for
+ * two reasons. First, the app consumes the 6-digit code via `verifyOtp` and
+ * nothing else; a link would introduce a second authentication path that the
+ * sign-in wall, the AuthModal step machine and the RLS predicate were not built
+ * around. Second, a proctoring vendor emailing "click here to sign in" trains
+ * exactly the reflex that makes credential phishing work against its own users.
+ * If a link is ever added, it has to be designed into the client flow — not
+ * dropped into this template.
+ */
+export function renderAuthEmail(input: AuthEmailInput): AuthEmailOutput {
+  const copy = ACTION_COPY[String(input.actionType)] ?? FALLBACK_COPY
+  const code = escapeHtml(input.token)
+  const recipient = input.email ? escapeHtml(input.email) : null
+  const minutes = input.expiryMinutes ?? CODE_EXPIRY_MINUTES
+
+  // The preheader is what the inbox list shows next to the subject. It carries
+  // the code deliberately: on a phone that is often the only thing the
+  // recipient needs to see, and it saves opening the message at all.
+  const preheader = `${input.token} is your ${BRAND.name} code. It expires in ${minutes} minutes.`
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="supported-color-schemes" content="dark light">
+<title>${escapeHtml(copy.subject)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:${BRAND.base};color:${BRAND.text};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${escapeHtml(preheader)}</div>
+<!-- Spacer entities stop clients appending the message body to the preview
+     line after the preheader ends. -->
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${BRAND.base};">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;width:100%;background-color:${BRAND.surface};border:1px solid ${BRAND.border};border-radius:12px;">
+
+        <tr>
+          <td style="padding:32px 32px 8px 32px;">
+            <p style="margin:0;font-size:15px;font-weight:600;letter-spacing:-0.01em;color:${BRAND.accent};">${BRAND.name}</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:16px 32px 0 32px;">
+            <h1 style="margin:0;font-size:20px;line-height:1.3;font-weight:600;color:${BRAND.text};">${escapeHtml(copy.heading)}</h1>
+            <p style="margin:12px 0 0 0;font-size:14px;line-height:1.6;color:${BRAND.muted};">${escapeHtml(copy.lead)}</p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:28px 32px 8px 32px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${BRAND.base};border:1px solid ${BRAND.border};border-radius:10px;">
+              <tr>
+                <td align="center" style="padding:22px 12px;">
+                  <!-- A monospace stack on purpose: a proportional font makes
+                       0/O and 1/l ambiguous in a code someone is retyping. -->
+                  <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace;font-size:32px;font-weight:700;letter-spacing:0.28em;color:${BRAND.text};">${code}</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:4px 32px 0 32px;">
+            <p style="margin:0;font-size:12px;line-height:1.6;color:${BRAND.faint};">
+              This code expires in ${minutes} minutes and can be used once.
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:20px 32px 32px 32px;">
+            <div style="border-top:1px solid ${BRAND.border};padding-top:16px;">
+              <p style="margin:0;font-size:12px;line-height:1.6;color:${BRAND.faint};">
+                ${recipient ? `Sent to ${recipient}. ` : ''}If you did not request this, no action is needed — the code is useless on its own and nothing has changed on your account.
+              </p>
+              <p style="margin:12px 0 0 0;font-size:12px;line-height:1.6;color:${BRAND.faint};">
+                ${BRAND.name} will never ask you for this code by email, chat or phone.
+              </p>
+            </div>
+          </td>
+        </tr>
+
+      </table>
+
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>`
+
+  // ⚠ THE PLAIN-TEXT PART IS NOT OPTIONAL. A message with no text/plain
+  // alternative scores poorly with spam filters, and a code email that lands in
+  // spam is indistinguishable, to the user, from a code email we never sent.
+  const text = [
+    copy.heading,
+    '',
+    copy.lead,
+    '',
+    `Code: ${input.token}`,
+    `Expires in ${minutes} minutes. Can be used once.`,
+    '',
+    input.email ? `Sent to ${input.email}.` : null,
+    'If you did not request this, no action is needed.',
+    `${BRAND.name} will never ask you for this code.`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n')
+
+  return { subject: copy.subject, html, text }
+}

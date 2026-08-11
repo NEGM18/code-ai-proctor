@@ -85,6 +85,13 @@ export function useExtensionBridge() {
   const [visionStatus, setVisionStatus] = useState(null);
   const [visionReason, setVisionReason] = useState(null);
 
+  // Non-null when a start was REFUSED for want of a verified session. Held as
+  // state rather than logged, because "the proctoring stack never started" has
+  // to be visible on the page: a silent no-op here would present as a demo that
+  // is running and simply never detects anything — the exact failure the vision
+  // OFFLINE banner exists to make impossible.
+  const [blockedReason, setBlockedReason] = useState(null);
+
   const raiseLiveStatus = useCallback(() => {
     setLiveStatus(LIVE_STATUS.ACTIVE);
     // Restart the window rather than stacking timers, so a burst of violations
@@ -223,24 +230,54 @@ export function useExtensionBridge() {
    * holding zero rows is the fingerprint of exactly that.
    *
    * `ensureDemoSession()` already solves this correctly for the in-page demo:
-   * it performs `signInAnonymously()` and returns a `sessionId` that IS the
-   * caller's `auth.uid()`. Reusing it here keeps one definition of "which
-   * folder may this visitor write to" instead of a second, weaker one.
+   * it returns a `sessionId` that IS the caller's `auth.uid()`. Reusing it here
+   * keeps one definition of "which folder may this visitor write to" instead of
+   * a second, weaker one.
    *
-   * @returns {Promise<string>} the session id (auth.uid() when remote).
+   * ⚠ IT NO LONGER SIGNS ANYONE IN. That function used to call
+   * `signInAnonymously()` when there was no session, which is what made the
+   * demo reachable by anybody — see its header. It now only reports the session
+   * the visitor already has, and this hook refuses to start when that session
+   * is not a verified one.
+   *
+   * @returns {Promise<string|null>} the session id (auth.uid()), or null when
+   *   the start was refused for want of a verified session.
    */
   const startGuestQuiz = useCallback(async () => {
     const token = ++startTokenRef.current;
 
     const session = await ensureDemoSession(null);
 
+    // ⚠ AN UNVERIFIED VISITOR STARTS NOTHING. THIS IS THE SECOND LOCK.
+    //
+    // `DemoGate` already refuses to mount `DemoQuizPage` without a verified
+    // session, so in the normal flow this branch is unreachable — which is
+    // exactly why it is here. This hook is what physically opens the camera and
+    // arms the extension, and it must not do that on the strength of some other
+    // component having checked. Anything that reaches this call unverified (a
+    // future route added without the gate, a session that expired between mount
+    // and start) gets nothing started, rather than a running proctoring session
+    // whose every upload the server then refuses.
+    if (!session.remote) {
+      setBlockedReason(session.reason ?? 'NOT_SIGNED_IN');
+      return null;
+    }
+    setBlockedReason(null);
+
     // The access token is what makes the request `authenticated` rather than
     // `anon`. ensureDemoSession deliberately does not return it — it is not
     // needed in-page, where the SDK attaches it — so read it here.
     let accessToken = null;
-    if (session.remote && supabase) {
+    let identity = { email: null, name: null };
+    if (supabase) {
       const { data } = await supabase.auth.getSession();
       accessToken = data?.session?.access_token ?? null;
+      identity = {
+        email: data?.session?.user?.email ?? null,
+        name: data?.session?.user?.user_metadata?.full_name
+          ?? data?.session?.user?.user_metadata?.name
+          ?? null,
+      };
     }
 
     // Superseded while we were signing in — the page was left, or a newer start
@@ -265,6 +302,14 @@ export function useExtensionBridge() {
       // extension can log "local only, and here is why" instead of guessing.
       remote: session.remote,
       reason: session.reason,
+      // ⚠ IDENTITY, NOT DECORATION. The extension used to label every demo
+      // participant "Guest Visitor" because there was no one to name. There is
+      // now, and a proctoring record that cannot say who was proctored is not a
+      // proctoring record. The extension still treats these as untrusted page
+      // input — they are display values, and the access decision was already
+      // made by the token above.
+      userEmail: identity.email || undefined,
+      userName: identity.name || undefined,
     }, '*');
 
     return session.sessionId;
@@ -314,6 +359,7 @@ export function useExtensionBridge() {
     liveStatus,
     visionStatus,
     visionReason,
+    blockedReason,
     startGuestQuiz,
     stopGuestQuiz,
   };
