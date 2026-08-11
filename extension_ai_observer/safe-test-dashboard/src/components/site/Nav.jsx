@@ -1,18 +1,12 @@
 // =============================================================================
-// Nav — logo left, links centre, one primary CTA right.
-//
-// ⚠ ONE PRIMARY CTA ON THE WHOLE PAGE. The nav used to carry four competing
-// actions (Sign in / Create account / Mock Exam / Try Live Demo). A visitor
-// deciding between four buttons picks none of them, and "Mock Exam" in
-// particular asked a Department Head to sit an exam when what they came to do
-// is evaluate a product. The ladder is now: Try Live Demo (primary) → Talk to
-// Sales (secondary) → Sign in (existing customers only). Sign-up still has a
-// path — every Pricing card routes into it.
+// Nav — logo left, links centre, profile avatar / sign-out or sign-in right.
 //
 // Brand system per THEME.md: the mark and the gradient CTA are chrome. The
 // verdict tokens (--color-verified and friends) are NOT used here — see
 // THEME.md §3 before reaching for one.
 // =============================================================================
+
+import { useAuth } from '../../lib/auth/useAuth.js';
 
 const LINKS = [
   { href: '#capabilities', label: 'What it detects' },
@@ -27,6 +21,13 @@ const LINKS = [
  * @param {() => void} props.onSignIn
  */
 export default function Nav({ onTryDemo, onSignIn }) {
+  const { user, profile, verified, signOut } = useAuth();
+  const isSignedIn = Boolean(user || verified);
+
+  const displayName = profile?.full_name || user?.email || 'Account';
+  const initial = (profile?.full_name?.[0] || user?.email?.[0] || 'U').toUpperCase();
+  const avatarUrl = user?.user_metadata?.avatar_url || user?.user_metadata?.picture;
+
   return (
     <header className="sticky top-0 z-40 border-b border-cyan-500/10 bg-base/80 backdrop-blur-md">
       <nav
@@ -57,14 +58,40 @@ export default function Nav({ onTryDemo, onSignIn }) {
           ))}
         </ul>
 
-        <div className="ml-auto flex shrink-0 items-center gap-2 lg:ml-0">
-          <button
-            type="button"
-            onClick={onSignIn}
-            className="hidden rounded-md px-3 py-1.5 text-sm text-slate-400 transition-colors duration-300 hover:text-slate-100 sm:block"
-          >
-            Sign in
-          </button>
+        <div className="ml-auto flex shrink-0 items-center gap-3 lg:ml-0">
+          {isSignedIn ? (
+            <div className="flex items-center gap-3">
+              {/* Circular profile avatar */}
+              <div
+                title={displayName}
+                className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-cyan-400/40 bg-surface/80 text-xs font-bold text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.3)] ring-1 ring-cyan-500/20"
+              >
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+                ) : (
+                  <span>{initial}</span>
+                )}
+              </div>
+
+              {/* Sign out button */}
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="rounded-md border border-slate-700/60 bg-surface/40 px-3 py-1.5 text-xs font-medium text-slate-300 transition-all duration-300 hover:border-slate-500 hover:text-slate-100"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onSignIn}
+              className="hidden rounded-md px-3 py-1.5 text-sm text-slate-400 transition-colors duration-300 hover:text-slate-100 sm:block"
+            >
+              Sign in
+            </button>
+          )}
+
           <a
             href="#contact"
             className="hidden rounded-md border border-cyan-500/25 px-3 py-1.5 text-sm text-slate-200 transition-all duration-300 hover:border-cyan-400/50 hover:shadow-[0_0_20px_rgba(6,182,212,0.15)] sm:block"
