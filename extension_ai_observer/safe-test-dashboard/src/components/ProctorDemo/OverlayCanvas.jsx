@@ -242,7 +242,7 @@ export default function OverlayCanvas({ frameStateRef, paintLoop, active = true 
     <canvas
       ref={canvasRef}
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 h-full w-full"
+      className="ph-no-capture ph-ignore-input pointer-events-none absolute inset-0 h-full w-full"
     />
   );
 }

@@ -101,8 +101,8 @@ function EvidenceCard({ record, createSnapshotUrl }) {
         >
           <img
             src={record.snapshot.dataUrl}
-            alt={`Evidence: ${TYPE_COPY[record.type] ?? record.type}`}
-            className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+            alt="Evidence snapshot"
+            className="ph-no-capture ph-ignore-input h-full w-full object-cover transition group-hover:scale-[1.02]"
           />
           {/* Expand icon overlay */}
           <span className="absolute right-2 top-2 rounded-md bg-base/70 px-1.5 py-0.5 text-[10px] text-slate-300 opacity-0 backdrop-blur-sm transition group-hover:opacity-100">

@@ -14,12 +14,16 @@
 // and is re-enforced by RLS on every upload.
 // =============================================================================
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
-import { LIVE_STATUS, VISION_STATUS, useExtensionBridge } from '../../hooks/useExtensionBridge.js';
+import { VISION_STATUS, useExtensionBridge } from '../../hooks/useExtensionBridge.js';
 import { useAuth } from '../../lib/auth/useAuth.js';
+import { createReviewBudget, reviewFlaggedSnapshot } from '../../lib/ai/snapshotReview.js';
+import { wrapReviewFlaggedSnapshot } from '../../lib/telemetry/index.js';
 import { navigate } from '../../lib/route.js';
 import EvidencePanel from './EvidencePanel.jsx';
+
+const instrumentedReviewFlaggedSnapshot = wrapReviewFlaggedSnapshot(reviewFlaggedSnapshot);
 
 const EXAM_SECONDS = 5 * 60;
 
@@ -133,6 +137,26 @@ export default function DemoQuizPage() {
   // candidate cannot tab away, read something, and tab back to an already-clear
   // screen — the acknowledgement is the point, not the blur itself.
   const [focusLost, setFocusLost] = useState(false);
+
+  // ---- AI review of flagged frames ----
+  //
+  // ⚠ A REF, NOT STATE, AND NOT A MODULE CONSTANT.
+  //
+  // State would re-render the exam on every budget change, for a number the
+  // candidate must never see. A module-level counter would survive a re-entry
+  // into /demo-quiz and hand the second sitting a budget already spent by the
+  // first — which presents as "the AI review stopped working", with nothing in
+  // any log to explain it. The budget belongs to the sitting, so it lives as
+  // long as this component and no longer.
+  const reviewBudgetRef = useRef(createReviewBudget());
+  // A single in-flight guard. Violations arrive in bursts (a phone episode
+  // refreshes its hold for seconds), and without this a burst would fire three
+  // concurrent uploads that each read the budget as 0-used and spend the whole
+  // sitting's allowance on one incident.
+  const reviewInFlightRef = useRef(false);
+  // Non-null only when the pipeline itself is misconfigured — never when a frame
+  // was simply not flagged. See the banner note in EvidencePanel.
+  const [reviewUnavailable, setReviewUnavailable] = useState(null);
 
   const containerRef = useRef(null);
   // Tracks the PREVIOUS fullscreen state so the warning fires on a genuine
@@ -274,6 +298,77 @@ export default function DemoQuizPage() {
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
+  // ---- flagged frame → second opinion from the model ----
+  //
+  // ⚠ THE ON-DEVICE DETECTOR RAISES THE FLAG; THE MODEL ONLY GRADES IT.
+  //
+  // This never initiates a capture. It reacts to a violation the extension has
+  // already confirmed through its own gates (the 3-of-5 phone window, the 2.2 s
+  // pose dwell, the EAR veto), and asks a second, independent reader whether the
+  // frame actually supports the claim. That ordering is what keeps the API cost
+  // bounded by the detector's own precision rather than by how long the exam is.
+  //
+  // ⚠ WHAT IS DELIBERATELY NOT DONE WITH THE ANSWER: it is not rendered, not
+  // counted on screen, and not fed back into anything the candidate can observe.
+  // The only visible consequence during the sitting is nothing at all.
+  //
+  // The 3-per-sitting cap and the >= 95% early stop are ENFORCED SERVER-SIDE.
+  // `reviewBudgetRef` mirrors the server's count so an exhausted page stops
+  // uploading webcam frames it already knows will be refused; it is not the
+  // control, and editing it in devtools buys nothing.
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.source !== window) return;
+      const msg = event.data;
+      if (msg?.type !== 'SAFETEST_GUEST_VIOLATION') return;
+
+      const image = msg.snapshotB64;
+      if (!image) return;                       // nothing to review
+      if (!bridge.guestSessionId) return;       // no verified session, no upload
+      if (!bridge.sittingId) return;            // no sitting open, nothing to charge
+      if (reviewBudgetRef.current.closed) return;
+      if (reviewInFlightRef.current) return;
+
+      reviewInFlightRef.current = true;
+      void instrumentedReviewFlaggedSnapshot({
+        budget: reviewBudgetRef.current,
+        // ⚠ THE SITTING ID, NOT THE UID. This used to send
+        // `bridge.guestSessionId`, which IS `auth.uid()`, on the stated
+        // reasoning that it "dies with the page". It does not — it is the
+        // account id and is constant for the life of the account — so the
+        // server's "3 reviewed frames per sitting" was really 3 per student
+        // ever, and a candidate's second sitting found the budget spent with
+        // nothing in any log explaining why the review had stopped. The uid is
+        // still what the Edge Function charges and files under; it comes from
+        // the caller's own token there, never from this body.
+        demoSessionId: bridge.sittingId,
+        violationType: msg.violationType,
+        severity: msg.severity ?? null,
+        imageBase64: image,
+      })
+        .then((result) => {
+          // ⚠ ONLY A CONFIGURATION FAULT IS SURFACED. A refused review, an
+          // exhausted budget or a NOT_CHEATING verdict are all normal and must
+          // stay invisible; a deployment with no GEMINI_API_KEY looks identical
+          // to a clean session unless it is named.
+          if (!result.ok && (result.reason === 'GEMINI_NOT_CONFIGURED' || result.reason === 'CALL_FAILED')) {
+            setReviewUnavailable(result.reason);
+          } else if (result.ok) {
+            setReviewUnavailable(null);
+          }
+        })
+        .finally(() => {
+          reviewInFlightRef.current = false;
+        });
+    };
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+    // Re-bound when the sitting changes as well as when the session does: the
+    // handler closes over `bridge.sittingId`, and a listener left holding the
+    // previous sitting's id would charge sitting two's frames to sitting one.
+  }, [bridge.guestSessionId, bridge.sittingId]);
+
   // ---- automatic recovery ----
   //
   // Resume once the candidate is genuinely back: focused, visible AND in
@@ -336,20 +431,19 @@ export default function DemoQuizPage() {
     return () => clearInterval(timer);
   }, [submitted]);
 
-  // ---- merged violations ----
-  const violations = useMemo(() => {
-    const combined = bridge.extensionViolations.map((v) => ({
-      ...v,
-      source: 'extension',
-    }));
-    combined.sort((a, b) => (b.wallTime ?? 0) - (a.wallTime ?? 0));
-    return combined;
-  }, [bridge.extensionViolations]);
-
-  // Recency-based, not count-based — see LIVE_STATUS_RECOVERY_MS in the hook.
-  const liveActive = bridge.liveStatus === LIVE_STATUS.ACTIVE;
-  // Strict equality, never a falsy check: `null` means "still loading", and
-  // treating it as offline would flash the fault banner on every entry.
+  // ⚠ `bridge.extensionViolations` IS DELIBERATELY NOT READ HERE ANY MORE.
+  //
+  // This page used to merge, sort and render that list, and derive a live
+  // "INCIDENT ACTIVE" reading from `bridge.liveStatus`. Both were removed on
+  // 2026-08-16: they told the candidate, during the exam, exactly what the
+  // detector had just concluded about them, which is a labelled feedback loop
+  // for evading it. The hook still maintains the list — it is what drives the
+  // focus-loss overlay and the AI review above — it is simply never displayed.
+  //
+  // Strict equality on the vision status, never a falsy check: `null` means
+  // "still loading", and treating it as offline would flash the fault banner on
+  // every entry. This one stays visible because it reports the health of the
+  // proctoring stack, not a finding about the person.
   const visionOffline = bridge.visionStatus === VISION_STATUS.OFFLINE;
 
   const answeredCount = Object.keys(answers).length;
@@ -524,18 +618,50 @@ export default function DemoQuizPage() {
                 <p className="tnum mt-3 font-mono text-4xl font-bold text-slate-100">
                   {score} / {QUESTIONS.length}
                 </p>
+                {/* ⚠ THE SCORE IS THE ONLY VERDICT THIS SCREEN GIVES.
+                    It used to also print "N incidents were detected… review the
+                    evidence cards", which is the same in-exam disclosure the
+                    evidence panel was stripped of — and it would now be a lie
+                    besides, since there are no cards to review. Whether anything
+                    was flagged is a question the dashboard answers, after the
+                    frames have been reviewed and with the reasoning attached. */}
                 <p className="mt-4 max-w-md text-sm leading-relaxed text-slate-400">
-                  {violations.length === 0
-                    ? 'No misconduct was flagged during this session. An empty evidence stream confirms full compliance.'
-                    : `${violations.length} ${violations.length === 1 ? 'incident was' : 'incidents were'} detected in real-time by AI Observer. Review the evidence cards on the diagnostic panel.`}
+                  Your paper has been submitted. Proctoring evidence from this
+                  sitting is reviewed separately — open your integrity record to
+                  see whether anything was flagged.
                 </p>
-                <button
-                  type="button"
-                  onClick={handleExit}
-                  className="mt-6 rounded-lg border border-slate-700 bg-surface-raised px-6 py-2 text-sm font-medium text-slate-200 hover:border-slate-500"
-                >
-                  Return to Dashboard
-                </button>
+
+                <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                  {/* ⚠ THE SITTING IS TORN DOWN FIRST, THEN WE NAVIGATE.
+                      `handleExit` stops the extension, releases the camera and
+                      leaves fullscreen. Navigating straight to the dashboard
+                      without it would leave a webcam running behind a page that
+                      no longer has anything mounted to stop it — the same defect
+                      the stop/start guards in useExtensionBridge exist for. */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await stopGuestQuiz();
+                      await exitFullscreenMode();
+                      navigate('/student/dashboard');
+                    }}
+                    className="rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-2.5 text-sm font-semibold text-[var(--color-base)] transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                  >
+                    See if you were flagged
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExit}
+                    className="rounded-lg border border-slate-700 bg-surface-raised px-6 py-2 text-sm font-medium text-slate-200 hover:border-slate-500"
+                  >
+                    Back to site
+                  </button>
+                </div>
+
+                <p className="mt-4 max-w-md text-xs leading-relaxed text-slate-600">
+                  A review can take a few seconds to appear. If nothing is
+                  listed, nothing was flagged.
+                </p>
               </div>
             </div>
           ) : (
@@ -639,21 +765,20 @@ export default function DemoQuizPage() {
                 value={bridge.guestSessionId ? 'Scoped to your account' : 'Disabled (Local Holding Only)'}
                 tone="text-slate-400"
               />
-              {/* ⚠ TWO SEPARATE ROWS, AND THEY MUST STAY SEPARATE.
-                  "Live Status" is an instantaneous reading that clears 3 s after
-                  the last event; the total below is cumulative history. Showing
-                  only the total — as this panel used to — meant one glance away
-                  in minute one left the page reporting an active incident for
-                  the rest of the session. */}
+              {/* ⚠ "LIVE STATUS" AND "TOTAL FLAGGED" WERE REMOVED HERE, AND THE
+                  REASON IS NOT COSMETIC.
+                  They were the last two readouts on this page that told the
+                  candidate what the detector had concluded — one instantaneous
+                  ("INCIDENT ACTIVE"), one cumulative ("3"). Between them they
+                  gave a live, labelled signal a candidate could optimise
+                  against: move, watch the row, learn the threshold. Everything
+                  that remains above describes the SETUP (is the extension
+                  attached, is the camera fullscreen, who is signed in), which is
+                  information the candidate needs and cannot game. */}
               <HudRow
-                label="Live Status"
-                value={liveActive ? 'INCIDENT ACTIVE' : 'NORMAL'}
-                tone={liveActive ? 'text-violation font-bold' : 'text-verified font-semibold'}
-              />
-              <HudRow
-                label="Total Flagged (session)"
-                value={violations.length}
-                tone={violations.length > 0 ? 'text-glance' : 'text-slate-400'}
+                label="Observation"
+                value="Active"
+                tone="text-verified font-semibold"
               />
             </dl>
 
@@ -682,9 +807,13 @@ export default function DemoQuizPage() {
             ) : null}
           </section>
 
-          {/* Real-time Evidence Panel holding snapshots & verdicts directly */}
+          {/* Proctoring status only — no snapshots, no verdicts. See the header
+              of EvidencePanel.jsx for why this panel is deliberately blind. */}
           <div className="min-h-0 flex-1 rounded-card border border-slate-800 bg-surface-raised/40 p-4 shadow-inner">
-            <EvidencePanel violations={violations} />
+            <EvidencePanel
+              monitoring={!bridge.blockedReason && bridge.extensionDetected === true}
+              reviewUnavailable={reviewUnavailable}
+            />
           </div>
         </aside>
 

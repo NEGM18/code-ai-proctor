@@ -12,14 +12,18 @@
 import { useEffect, useState } from 'react'
 import { supabase, isSupabaseConfigured, SUPABASE_UNCONFIGURED_REASON } from '../supabase.js'
 import {
+  createAvatarSignedUrl,
   fetchOwnProfile,
   sendEmailCode,
   signInWithGoogle,
   signInWithPassword,
   signOutCurrentUser,
   signUpWithRole,
+  updateOwnProfile,
   verifyEmailCode,
 } from './authService.js'
+import { avatarUrlFrom } from '../profileIdentity.js'
+import { redeemThisDevice } from './deviceTrust.js'
 import {
   SESSION_STATE,
   isAnonymousSession,
@@ -35,45 +39,44 @@ const UNCONFIGURED_STATE = {
   user: null,
   profile: null,
   profileError: null,
+  avatarUrl: null,
+  deviceTrusted: false,
+}
+
+/**
+ * The picture to render for an account, resolved once here so the nav and the
+ * dashboard can never disagree about it.
+ *
+ * ⚠ THE UPLOADED PICTURE OUTRANKS THE PROVIDER'S. `avatar_path` is a file the
+ * student deliberately chose; `user_metadata.avatar_url` is whatever Google
+ * happened to have. Resolving in the other order would make an upload look like
+ * it silently did nothing for every account that signed in with Google.
+ *
+ * Signing can fail (expired session, deleted object) and that is not an error
+ * worth surfacing — it returns null, and the caller falls back to initials.
+ */
+async function resolveAvatarUrl(user, profile) {
+  const signed = await createAvatarSignedUrl(profile?.avatar_path)
+  return signed ?? avatarUrlFrom(user, profile)
 }
 
 export function AuthProvider({ children }) {
   const [state, setState] = useState(() =>
     isSupabaseConfigured
-      ? { loading: true, session: null, user: null, profile: null, profileError: null }
+      ? { ...UNCONFIGURED_STATE, loading: true }
       : UNCONFIGURED_STATE,
   )
 
   useEffect(() => {
-    // `isSupabaseConfigured` is derived once, at module load, from
-    // import.meta.env — it cannot change for the lifetime of this
-    // component, so the unconfigured case needs no effect at all: the
-    // useState initializer above already set `UNCONFIGURED_STATE`.
-    // Calling setState synchronously here just to re-assert the same value
-    // would only add a redundant render (and trips
-    // react-hooks/set-state-in-effect), so it's skipped entirely.
     if (!isSupabaseConfigured || !supabase) return
 
     let cancelled = false
 
     async function applySession(session) {
-      // ---- evict any surviving anonymous session ----
-      //
-      // ⚠ THIS IS THE MIGRATION PATH FOR THE GUEST PROBLEM, NOT A TIDY-UP.
-      // `persistSession: true` means every visitor who opened the demo before
-      // this change still has a working anonymous token in localStorage, and it
-      // stays valid until it expires. Without this, those visitors keep a
-      // session that reads as signed-in to `useAuth()` while every RLS policy
-      // now refuses it — the exact "UI says fine, server says no" split the
-      // sign-in wall exists to prevent. Signing them out converts a stale guest
-      // into a clean SIGNED_OUT visitor who is shown the wall.
-      //
-      // Fires at most once per stale token: signOut triggers onAuthStateChange
-      // with a null session, which takes the branch below instead.
       if (session && isAnonymousSession(session)) {
         await signOutCurrentUser()
         if (!cancelled) {
-          setState({ loading: false, session: null, user: null, profile: null, profileError: null })
+          setState({ ...UNCONFIGURED_STATE, loading: false })
         }
         return
       }
@@ -81,21 +84,40 @@ export function AuthProvider({ children }) {
       const user = session?.user ?? null
       if (!user) {
         if (!cancelled) {
-          setState({ loading: false, session, user: null, profile: null, profileError: null })
+          setState({ ...UNCONFIGURED_STATE, loading: false, session })
         }
         return
       }
       const result = await fetchOwnProfile(user.id)
       if (cancelled) return
+
+      // ⚠ RE-REDEEMED ON EVERY LOAD, NOT JUST AT SIGN-IN. After a page reload
+      // the JWT's `amr` is still [password] — device trust lives in a server-side
+      // marker, not in the token — so without this the client would call a
+      // session unverified that the database happily accepts, and the dashboard
+      // would show "Sign in required" to someone who is fully signed in.
+      // Idempotent server-side (upsert on session_id), and skipped entirely when
+      // `amr` already proves verification, so it costs nothing for Google users.
+      const deviceTrusted = isVerifiedSession(session)
+        ? false
+        : await redeemThisDevice(user.id)
+      if (cancelled) return
+
+      const profile = result.ok ? result.data : null
+      // Awaited before the state write, so the avatar appears in the same paint
+      // as the name. Resolving it afterwards would render initials first and
+      // swap in the photo a beat later, which reads as a flicker on every load.
+      const avatarUrl = await resolveAvatarUrl(user, profile)
+      if (cancelled) return
+
       setState({
         loading: false,
         session,
         user,
-        profile: result.ok ? result.data : null,
-        // A profile fetch can fail (e.g. row not yet created by the
-        // trigger, RLS misconfiguration on a fresh project) without that
-        // being an authentication failure — the session is still real.
+        profile,
         profileError: result.ok ? null : result.reason,
+        avatarUrl,
+        deviceTrusted,
       })
     }
 
@@ -113,6 +135,32 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
+  const updateProfile = async ({ fullName, organizationName, avatarPath }) => {
+    if (!state.user?.id) return { ok: false, reason: 'NO_USER' }
+
+    const result = await updateOwnProfile({ userId: state.user.id, fullName, organizationName, avatarPath })
+    if (!result.ok) return result
+
+    // `result.data` is the row PostgREST echoed back, which is authoritative.
+    // The spread is only for the no-op case where nothing was sent and there is
+    // no returned row — patching each field individually keeps an untouched
+    // column from being clobbered with `undefined`.
+    const profile = result.data ?? {
+      ...(state.profile ?? {}),
+      ...(fullName !== undefined ? { full_name: fullName } : {}),
+      ...(organizationName !== undefined ? { organization_name: organizationName } : {}),
+      ...(avatarPath !== undefined ? { avatar_path: avatarPath } : {}),
+    }
+
+    // Re-signed rather than reused: the path may have changed format (png ->
+    // jpg), and a cleared picture must fall back to the provider photo here
+    // rather than leaving the previous signed URL on screen until reload.
+    const avatarUrl = await resolveAvatarUrl(state.user, profile)
+    setState(prev => ({ ...prev, profile, avatarUrl }))
+
+    return result
+  }
+
   const value = {
     configured: isSupabaseConfigured,
     unconfiguredReason: isSupabaseConfigured ? null : SUPABASE_UNCONFIGURED_REASON,
@@ -121,21 +169,17 @@ export function AuthProvider({ children }) {
     user: state.user,
     profile: state.profile,
     profileError: state.profileError,
+    // Ready to drop straight into an <img src>. Null means "no picture" — the
+    // consumer renders initials rather than a broken image.
+    avatarUrl: state.avatarUrl,
 
-    // ---- the demo's admission ticket ----
-    //
-    // ⚠ `verified` IS NOT `!!user`, AND CONFLATING THEM REOPENS THE HOLE.
-    // A password-only session has a real `user` and is deliberately NOT
-    // verified — the emailed code has not been entered yet, so its JWT lacks
-    // the `amr` claim RLS requires. Every gate must read `verified`; a `user`
-    // truthiness check would wave through exactly the sessions the second
-    // factor exists to stop. See lib/auth/session.js.
-    verified: isVerifiedSession(state.session),
-    // Which of the four states, for the UI: "sign in", "you are a guest",
-    // "enter the code we emailed" and "you're in" are four different messages.
+    // Two routes to the same answer, mirroring the two branches of
+    // session_is_verified_human(): a mailbox-proving `amr`, or a redeemed device
+    // marker for this session. Keeping both here is what stops the UI and the
+    // database disagreeing about who is signed in.
+    verified: isVerifiedSession(state.session) || state.deviceTrusted,
+    deviceTrusted: state.deviceTrusted,
     sessionStatus: isSupabaseConfigured ? sessionState(state.session) : SESSION_STATE.SIGNED_OUT,
-    // The address a pending code should go to, so the code step never asks a
-    // visitor to retype an address they have already proved they can spell.
     pendingEmail: sessionEmail(state.session),
 
     signUp: signUpWithRole,
@@ -144,6 +188,7 @@ export function AuthProvider({ children }) {
     signInWithGoogle,
     sendEmailCode,
     verifyEmailCode,
+    updateProfile,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

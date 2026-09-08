@@ -1,12 +1,18 @@
 // =============================================================================
-// Nav — logo left, links centre, profile avatar / sign-out or sign-in right.
+// Nav — logo left, links centre, account avatar or sign-in right.
 //
 // Brand system per THEME.md: the mark and the gradient CTA are chrome. The
 // verdict tokens (--color-verified and friends) are NOT used here — see
 // THEME.md §3 before reaching for one.
+//
+// The signed-in branch is one component: `AvatarMenu` owns the circle, the
+// popover, and sign-out. It used to be an inert avatar div plus a separate
+// "Sign out" text button rendered side by side here — see that file's header
+// for why that pairing was replaced rather than restyled.
 // =============================================================================
 
 import { useAuth } from '../../lib/auth/useAuth.js';
+import AvatarMenu from './AvatarMenu.jsx';
 
 const LINKS = [
   { href: '#capabilities', label: 'What it detects' },
@@ -21,12 +27,8 @@ const LINKS = [
  * @param {() => void} props.onSignIn
  */
 export default function Nav({ onTryDemo, onSignIn }) {
-  const { user, profile, verified, signOut } = useAuth();
+  const { user, verified } = useAuth();
   const isSignedIn = Boolean(user || verified);
-
-  const displayName = profile?.full_name || user?.email || 'Account';
-  const initial = (profile?.full_name?.[0] || user?.email?.[0] || 'U').toUpperCase();
-  const avatarUrl = user?.user_metadata?.avatar_url || user?.user_metadata?.picture;
 
   return (
     <header className="sticky top-0 z-40 border-b border-cyan-500/10 bg-base/80 backdrop-blur-md">
@@ -60,28 +62,7 @@ export default function Nav({ onTryDemo, onSignIn }) {
 
         <div className="ml-auto flex shrink-0 items-center gap-3 lg:ml-0">
           {isSignedIn ? (
-            <div className="flex items-center gap-3">
-              {/* Circular profile avatar */}
-              <div
-                title={displayName}
-                className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-cyan-400/40 bg-surface/80 text-xs font-bold text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.3)] ring-1 ring-cyan-500/20"
-              >
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
-                ) : (
-                  <span>{initial}</span>
-                )}
-              </div>
-
-              {/* Sign out button */}
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className="rounded-md border border-slate-700/60 bg-surface/40 px-3 py-1.5 text-xs font-medium text-slate-300 transition-all duration-300 hover:border-slate-500 hover:text-slate-100"
-              >
-                Sign out
-              </button>
-            </div>
+            <AvatarMenu />
           ) : (
             <button
               type="button"

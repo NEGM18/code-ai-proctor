@@ -82,12 +82,14 @@ export function TelemetryProvider({ children, isSittingActive }) {
 
   // --- Pageviews -----------------------------------------------------------
   useEffect(() => {
-    // ⚠ MANUAL, BECAUSE THIS APP HAS NO ROUTER LIBRARY. `src/lib/route.js` is a
-    // `useSyncExternalStore` over `popstate`, and `navigate()` dispatches a
-    // synthetic PopStateEvent. `capture_pageview` is set to false in posthog.js
-    // precisely so this is the single place a navigation is recorded, rather
-    // than a mix of automatic and manual events that double-count.
-    capture('$pageview', { pathname });
+    const currentUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}${pathname}`
+      : pathname;
+    capture('$pageview', {
+      $current_url: currentUrl,
+      path: pathname,
+      pathname,
+    });
   }, [pathname]);
 
   return children;

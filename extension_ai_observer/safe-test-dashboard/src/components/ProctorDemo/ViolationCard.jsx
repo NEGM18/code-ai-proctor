@@ -112,10 +112,10 @@ export default function ViolationCard({ record, nowMs, createSnapshotUrl }) {
           >
             <img
               src={record.snapshot.dataUrl}
-              alt={`Evidence snapshot for ${TYPE_COPY[record.type] ?? record.type}`}
+              alt="Evidence snapshot"
               width={96}
               height={72}
-              className="h-[72px] w-24 object-cover"
+              className="ph-no-capture ph-ignore-input h-[72px] w-24 object-cover"
             />
           </button>
         ) : (

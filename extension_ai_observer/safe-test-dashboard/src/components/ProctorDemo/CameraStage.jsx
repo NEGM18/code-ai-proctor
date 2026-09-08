@@ -70,7 +70,7 @@ export default function CameraStage({
             page load. */}
         <video
           ref={videoRef}
-          className="h-full w-full object-cover"
+          className="ph-no-capture ph-ignore-input h-full w-full object-cover"
           playsInline
           muted
         />

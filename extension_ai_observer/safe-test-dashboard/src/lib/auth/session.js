@@ -46,6 +46,41 @@ export const VERIFIED_AMR_METHODS = Object.freeze([
 /** Any `mfa/<factor>` method also counts — matches the SQL `like 'mfa/%'`. */
 const MFA_METHOD_PREFIX = 'mfa/'
 
+/**
+ * Has the ACCOUNT behind this session ever proved its mailbox?
+ *
+ * ⚠ THIS MIRRORS BRANCH (c) OF session_is_verified_human(), ADDED 2026-08-16,
+ * AND IT IS WHAT REMOVED THE EMAILED CODE FROM EVERY SIGN-IN.
+ *
+ * Read the note on VERIFIED_AMR_METHODS above before treating this as
+ * equivalent to them: those answer "did THIS session prove a mailbox", which is
+ * a second factor. This answers "was this ACCOUNT confirmed at sign-up", which
+ * is not — it is true forever once sign-up completes, so a password alone now
+ * satisfies the gate. That was the instruction; the trade is written out in
+ * supabase/migrations/20260816120000_ai_review_and_sealed_evidence.sql.
+ *
+ * Two sources, because they can disagree and only one is always present:
+ *   - `session.user.email_confirmed_at` is what supabase-js exposes on the user
+ *     object it hydrates from GoTrue. Authoritative, but absent if a caller
+ *     passes a bare `{ access_token }`.
+ *   - `user_metadata.email_verified` travels inside the JWT itself, which is
+ *     what the token-only callers have.
+ *
+ * Neither is trusted for access — the database re-derives this from
+ * `auth.users` on every statement. This decides what to RENDER.
+ *
+ * @param {object | null | undefined} session
+ * @returns {boolean}
+ */
+export function accountEmailConfirmed(session) {
+  if (!session) return false
+  if (session.user?.email_confirmed_at) return true
+  // Older accounts carry `confirmed_at` instead.
+  if (session.user?.confirmed_at) return true
+  const payload = decodeJwtPayload(session.access_token)
+  return payload?.user_metadata?.email_verified === true
+}
+
 export const SESSION_STATE = Object.freeze({
   /** No session at all. */
   SIGNED_OUT: 'SIGNED_OUT',
@@ -134,9 +169,15 @@ export function isVerifiedSession(session) {
   if (!session?.access_token) return false
   if (isAnonymousSession(session)) return false
   const methods = sessionAmrMethods(session)
-  return methods.some(
+  if (methods.some(
     (method) => VERIFIED_AMR_METHODS.includes(method) || method.startsWith(MFA_METHOD_PREFIX),
-  )
+  )) {
+    return true
+  }
+  // Branch (c): a password session on a confirmed account. See
+  // accountEmailConfirmed — this is the branch that removed the emailed code
+  // from every sign-in, and it is weaker than the ones above by design.
+  return accountEmailConfirmed(session)
 }
 
 /**

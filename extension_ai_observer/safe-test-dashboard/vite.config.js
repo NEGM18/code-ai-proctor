@@ -11,30 +11,7 @@ export default defineConfig({
     tailwindcss(),
   ],
 
-  // ---------------------------------------------------------------------------
-  // Cross-origin isolation for local dev.
-  //
-  // These MIRROR public/_headers, which is what Cloudflare Pages serves in
-  // production — the reasoning and the two warnings live there, not here. The
-  // duplication is unavoidable: `_headers` is a Pages deploy artifact and the
-  // Vite dev server never reads it, so without this block `crossOriginIsolated`
-  // is false in dev and true in production. That difference is exactly the kind
-  // that hides a COEP-blocked resource until after deploy.
-  //
-  // `preview` gets them too, so `npm run preview` reproduces production.
-  // ---------------------------------------------------------------------------
-  server: {
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-    },
-  },
-  preview: {
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-    },
-  },
+
 
   // ---------------------------------------------------------------------------
   // Vitest — PLAN.md §6 Phase 0.

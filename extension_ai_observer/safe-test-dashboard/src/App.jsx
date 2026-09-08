@@ -35,6 +35,7 @@ import { usePathname, navigate } from './lib/route.js';
 import { LEGAL_SLUGS } from './content/legalContent.js';
 import LegalPage from './components/legal/LegalPage.jsx';
 import DemoQuizPage from './components/MCQQuiz/DemoQuizPage.jsx';
+import StudentDashboard from './components/student/StudentDashboard.jsx';
 import Nav from './components/site/Nav.jsx';
 import Hero from './components/site/Hero.jsx';
 import Marquee from './components/site/Marquee.jsx';
@@ -100,6 +101,17 @@ export default function App() {
         <DemoQuizPage />
       </DemoGate>
     );
+  }
+
+  // The student's own integrity record.
+  //
+  // ⚠ NO GATE WRAPPER HERE, UNLIKE /demo-quiz. DemoGate exists because
+  // DemoQuizPage opens a webcam in a mount effect, so an unverified visitor has
+  // to be stopped BEFORE it renders. This page opens no device and starts no
+  // pipeline — it owns its own `verified` branch and renders a sign-in prompt in
+  // place, which keeps the OAuth return landing on this url instead of bouncing.
+  if (pathname === '/student/dashboard') {
+    return <StudentDashboard />;
   }
 
   // Strip the leading slash once: "/privacy" -> "privacy", matching the keys in LEGAL_SLUGS.

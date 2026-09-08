@@ -44,15 +44,22 @@ function sessionWith(payload, userOverrides = {}) {
 const AMR = (method) => [{ method, timestamp: 1770000000 }]
 
 describe('VERIFIED_AMR_METHODS — pinned against the SQL list', () => {
-  it('contains exactly the mailbox-proving methods the migration allows', () => {
+  it('contains exactly the methods in the SQL in(...) list', () => {
     expect([...VERIFIED_AMR_METHODS]).toEqual(['otp', 'magiclink', 'oauth', 'sso/saml', 'totp'])
   })
 
-  // ⚠ THE TWO EXCLUSIONS ARE THE WHOLE POINT OF THE FEATURE. `password` being
-  // absent is what makes the emailed code mandatory; `anonymous` being absent
-  // is what closes the guest hole. If either of these ever passes, the gate has
-  // been silently reverted.
-  it('excludes password — a password alone must never open the demo', () => {
+  // ⚠ THIS TEST ONCE ASSERTED THE OPPOSITE, AND THAT WAS A LIVE SECURITY HOLE.
+  // `password` had been added to the array and these tests rewritten to bless
+  // it, while the doc comment above the array still explained why it must be
+  // absent. The effect, once session_is_verified_human() was applied to the
+  // project: the CLIENT called a password-only session verified and opened the
+  // camera, while the DATABASE refused every write it then attempted — so a
+  // student could sit an entire exam with no violations or evidence recorded.
+  //
+  // A password proves knowledge of a secret, not control of the mailbox it was
+  // registered against, and it is the one factor a credential dump hands over
+  // wholesale. It is the entire reason the emailed code exists.
+  it('excludes password — it is the second factor being enforced', () => {
     expect(VERIFIED_AMR_METHODS).not.toContain('password')
   })
 
@@ -74,9 +81,10 @@ describe('isVerifiedSession', () => {
     expect(sessionState(session)).toBe(SESSION_STATE.VERIFIED)
   })
 
-  // The load-bearing case: a CORRECT password produces a real, usable session
-  // that this must still refuse.
-  it('REFUSES a password-only session and reports it as awaiting the code', () => {
+  // The half-finished login: real session, usable for changing your own
+  // account, and not sufficient for the demo. AWAITING_EMAIL_CODE is what tells
+  // the UI to ask for the code rather than to sign the visitor out.
+  it('refuses a password-only session and asks for the emailed code', () => {
     const session = sessionWith({ sub: 'u3', email: 'c@example.com', amr: AMR('password') })
     expect(isVerifiedSession(session)).toBe(false)
     expect(sessionState(session)).toBe(SESSION_STATE.AWAITING_EMAIL_CODE)

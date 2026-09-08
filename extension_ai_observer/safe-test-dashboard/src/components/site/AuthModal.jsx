@@ -13,9 +13,10 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { useAuth } from '../../lib/auth/useAuth.js';
+import { enrollThisDevice, redeemThisDevice } from '../../lib/auth/deviceTrust.js';
 import { ROLE, ROLE_VALUES, ROLE_LABELS } from '../../lib/auth/roles.js';
 import { EMAIL_CODE_LENGTH } from '../../lib/auth/authService.js';
-import { SESSION_STATE } from '../../lib/auth/session.js';
+import { SESSION_STATE, isVerifiedSession } from '../../lib/auth/session.js';
 
 const REASON_COPY = {
   SUPABASE_UNCONFIGURED:
@@ -133,8 +134,52 @@ export default function AuthModal({ mode: initialMode = 'signin', initialRole = 
 
     if (mode === 'signin') {
       const outcome = await signIn({ email, password });
+      if (!outcome.ok) {
+        setPending(false);
+        setResult(outcome);
+        return;
+      }
+
+      // ⚠ SIGN-IN NO LONGER ASKS FOR A CODE, AND THAT IS A DELIBERATE CHANGE
+      // (2026-08-16), NOT THE BUG THIS COMMENT USED TO WARN ABOUT.
+      //
+      // The old behaviour was mandatory: `signInWithPassword` mints a session
+      // whose `amr` is [password], and session_is_verified_human() rejected
+      // exactly that, so closing the modal on `ok` left a visitor who LOOKED
+      // signed in while every database write failed. Branch (c) of that
+      // predicate now accepts a password session on a CONFIRMED account, so the
+      // session really is usable the moment the password lands — and asking for
+      // a code would be asking a returning user to re-prove a mailbox the
+      // account already proved at sign-up.
+      //
+      // The check is `isVerifiedSession`, not `outcome.ok`. That is the whole
+      // safety of this branch: it asks the same question the database will ask,
+      // rather than assuming the answer. An account that never completed
+      // sign-up confirmation still fails it and still falls through to the code
+      // step below, which is exactly where it should be.
+      const session = outcome.data?.session ?? null;
+      if (isVerifiedSession(session)) {
+        setPending(false);
+        onVerified?.();
+        handleClose();
+        return;
+      }
+
+      // A browser that has completed a code before holds a device secret. The
+      // server exchanges it for verification of THIS session, so no email is
+      // sent. Now only reachable for an UNCONFIRMED account, which is a narrow
+      // case — kept because it costs nothing and still works.
+      const userId = outcome.data?.user?.id ?? null;
+      if (userId && (await redeemThisDevice(userId))) {
+        setPending(false);
+        onVerified?.();
+        handleClose();
+        return;
+      }
+
+      const sent = await requestCode(email);
       setPending(false);
-      setResult(outcome);
+      if (sent) setStep(STEP.CODE);
       return;
     }
 
@@ -158,9 +203,29 @@ export default function AuthModal({ mode: initialMode = 'signin', initialRole = 
     setPending(true);
     setResult(null);
     setNotice(null);
-    const outcome = await verifyEmailCode({ email, token: code, type: 'signup' });
+    // A returning user is already confirmed, so their code is an `email` OTP,
+    // not a `signup` confirmation. verifyEmailCode falls back between the two,
+    // but naming the right one first avoids a wasted round trip and a
+    // misleading error when the fallback is the one that succeeds.
+    const outcome = await verifyEmailCode({
+      email,
+      token: code,
+      type: mode === 'signin' ? 'email' : 'signup',
+    });
     setPending(false);
     setResult(outcome);
+    if (outcome.ok) {
+      // The session is verified as of this moment, which is the only window in
+      // which enrolment is permitted — enroll_trusted_device() refuses an
+      // unverified caller. Awaited, but a failure is deliberately ignored: not
+      // remembering the device costs an email next time, and must never block a
+      // sign-in that has already succeeded.
+      const userId = outcome.data?.user?.id ?? null;
+      if (userId) await enrollThisDevice(userId);
+
+      onVerified?.();
+      handleClose();
+    }
   };
 
   const onGoogle = async () => {
@@ -176,7 +241,7 @@ export default function AuthModal({ mode: initialMode = 'signin', initialRole = 
   };
 
   const failureCopy = result && !result.ok
-    ? (REASON_COPY[result.reason] ?? result.error?.message ?? 'That did not work.')
+    ? (REASON_COPY[result.reason] ?? result.error?.message ?? 'Invalid credentials or login failed. Please try again.')
     : null;
 
   const atCodeStep = step === STEP.CODE;
@@ -405,19 +470,36 @@ export default function AuthModal({ mode: initialMode = 'signin', initialRole = 
                 />
               </p>
 
+              {failureCopy ? (
+                <div role="alert" className="rounded-md border border-rose-500/40 bg-rose-500/10 p-3 text-xs font-medium text-rose-300">
+                  {failureCopy}
+                </div>
+              ) : null}
+
               <button
                 type="submit"
                 disabled={pending}
-                className="w-full rounded-md bg-verified px-4 py-2.5 text-sm font-semibold text-[var(--color-base)] transition hover:brightness-110 disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-verified px-4 py-2.5 text-sm font-semibold text-[var(--color-base)] transition hover:brightness-110 disabled:opacity-50"
               >
-                {pending ? 'Working…' : mode === 'signin' ? 'Sign in' : 'Create account'}
+                {pending ? (
+                  <>
+                    <svg className="h-4 w-4 animate-spin text-current" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span>Working…</span>
+                  </>
+                ) : mode === 'signin' ? (
+                  'Sign in'
+                ) : (
+                  'Create account'
+                )}
               </button>
             </form>
           </>
         )}
 
         <p aria-live="polite" className="mt-3 min-h-4 text-xs leading-relaxed">
-          {failureCopy ? <span className="text-violation">{failureCopy}</span> : null}
           {!failureCopy && notice ? <span className="text-slate-400">{notice}</span> : null}
           {verified ? <span className="text-verified">Signed in — the demo is open.</span> : null}
         </p>

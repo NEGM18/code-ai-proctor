@@ -362,9 +362,8 @@ export function identify(user) {
   if (!live() || !user || !user.id) return;
   try {
     posthog.identify(user.id, {
-      // Safe, low-cardinality, and genuinely useful for segmenting adoption.
-      // Nothing here identifies a person on its own.
       app_source: APP_SOURCE.WEB,
+      ...(user.email ? { email: user.email } : {}),
     });
   } catch { /* never fatal */ }
 }
